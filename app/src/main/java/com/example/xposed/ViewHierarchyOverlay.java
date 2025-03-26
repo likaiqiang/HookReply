@@ -386,7 +386,9 @@ public class ViewHierarchyOverlay {
                                     hideOverlay();
                                     textView.setText("显示视图");
                                 } else {
-                                    showOverlay();
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        showOverlay();
+                                    }
                                     textView.setText("隐藏视图");
                                 }
                             }
