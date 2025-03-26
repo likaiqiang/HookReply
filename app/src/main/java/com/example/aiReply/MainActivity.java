@@ -1,4 +1,4 @@
-package com.example.xposed;
+package com.example.aiReply;
 
 import android.app.Activity;
 import android.os.Bundle;
