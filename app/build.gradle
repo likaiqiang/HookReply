@@ -1,0 +1,30 @@
+plugins {
+    alias(libs.plugins.androidApplication)
+}
+
+android {
+    namespace 'com.example.xposed'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.xposed"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation libs.recyclerview
+    implementation libs.cardview
+    implementation libs.androidx.constraintlayout
+    implementation(libs.okhttp)
+    compileOnly files('lib/XposedBridgeApi-89.jar')
+}
