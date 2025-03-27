@@ -240,15 +240,23 @@ public class Hooker implements IXposedHookLoadPackage {
             });
         }
         private void init(Context context){
+            StringBuilder prompt = new StringBuilder("你是一位机智而敏锐的评论员，擅长针对文章评论进行合适的回复。你的任务是：")
+                    .append("\n1. 阅读文章内容，理解其主题和核心观点（文章内容如下）。")
+                    .append("\n2. 阅读用户的评论，确保你的回复能够体现对讨论主题的理解，而不是无关或空洞的回应。")
+                    .append("\n3. 你的回复应该简短但有力，避免冗长。")
+                    .append("\n4. 你的回复将直接作为回复文字使用，请勿说其他不必要的话")
+                    .append("\n5. 根据我的指示（友好/不友好），提供相应的回复，但必须站在第三者的角度，而不是以文章作者的身份进行回复。例如：")
+                    .append("\n\n * 友好回复：可以认同观点、补充信息、幽默互动或理性讨论。")
+                    .append("\n\n * 不友好回复：可以机智反驳、讽刺、巧妙反击，但不能低俗或恶意攻击。")
+                    .append("\n现在，请根据以下评论生成相应的回复：")
+                    .append("\n");
             Button button1 = new Button(context);
             button1.setText("同意");
             button1.setOnClickListener(v -> {
                 XposedBridge.log("Button click 1" + loading);
                 if(loading) return;
                 loading = true;
-                StringBuilder textContext = new StringBuilder();
-                textContext.append("文章内容: ").append(hooker.noteDetailText).append("\n原评论: ").append(hooker.commentText);
-                StringBuilder prompt = new StringBuilder("站在第三者的角度上根据以下要求生成评论回复\n1. ").append(textContext).append("\n2. 生成的回复将直接作为回复文字使用，请勿说其他不必要的话").append("\n3.生成的回复不少于30个字，不多于50个字，且文字必须连贯").append("\n4. 回复语气是积极的，可以是肯定、鼓励、感激");
+                prompt.append("文章内容: ").append(hooker.noteDetailText).append("\n用户评论: ").append(hooker.commentText).append("\n要求: 请生成一条友好的回复");
                 try {
                     askAi(String.valueOf(prompt));
                 } catch (JSONException e) {
@@ -265,10 +273,7 @@ public class Hooker implements IXposedHookLoadPackage {
                 XposedBridge.log("Button click 2" + loading);
                 if(loading) return;
                 loading = true;
-                StringBuilder textContext = new StringBuilder();
-                textContext.append("文章内容: ").append(hooker.noteDetailText).append("\n原评论: ").append(hooker.commentText);
-                StringBuilder prompt = new StringBuilder("站在第三者的角度上根据以下要求生成评论回复\n1. ").append(textContext).append("\n2. 生成的回复将直接作为回复文字使用，请勿说其他不必要的话").append("\n3.生成的回复不少于10个字，不多于30个字，且文字必须连贯").append("\n4. 回复语气是负面的，通常表示讽刺挖苦、冷嘲热讽");
-
+                prompt.append("文章内容: ").append(hooker.noteDetailText).append("\n用户评论: ").append(hooker.commentText).append("\n要求: 请生成一条不友好的回复");
                 try {
                     askAi(String.valueOf(prompt));
                 } catch (JSONException e) {
@@ -323,6 +328,7 @@ public class Hooker implements IXposedHookLoadPackage {
                                 // 设定点击的阈值（时间 & 移动距离）
                                 if (duration < 200 && deltaX < 10 && deltaY < 10) {
                                     XposedBridge.log("performClick view: " + view.getClass().getSimpleName());
+                                    XposedBridge.log("lastClickedView: " + lastClickedView);
                                     if(view.getClass().getSimpleName().equals("HandlePressStateCommentTextView")){
                                         lastClickedView = view;
 
@@ -357,6 +363,7 @@ public class Hooker implements IXposedHookLoadPackage {
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Activity activity = (Activity) param.thisObject;
                         XposedBridge.log("发现回复 Activity: " + activity.getClass().getName());
+                        XposedBridge.log("lastClickedView: " + lastClickedView);
                         if(lastClickedView != null){
                             ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
                             View _editTextView = findTargetView(rootView, "RichEditTextPro");
@@ -381,57 +388,67 @@ public class Hooker implements IXposedHookLoadPackage {
                 }
         );
 
-        XposedHelpers.findAndHookMethod("com.xingin.comment.input.ui.NoteCommentActivity", lpparam.classLoader, "onResume", new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                final Activity activity = (Activity) param.thisObject;
-                activity.runOnUiThread(new Runnable() {
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader,
+                "onResume",
+                new XC_MethodHook() {
                     @Override
-                    public void run() {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            showCommentView(activity, commentText);
-                        }
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final Activity activity = (Activity) param.thisObject;
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && lastClickedView != null) {
+                                    showCommentView(activity, commentText);
+                                }
+                            }
+                        });
                     }
                 });
-            }
-        });
 
-        XposedHelpers.findAndHookMethod("com.xingin.comment.input.ui.NoteCommentActivity", lpparam.classLoader, "onDestroy", new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                final Activity activity = (Activity) param.thisObject;
-                activity.runOnUiThread(new Runnable() {
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader, "onDestroy",
+                new XC_MethodHook() {
                     @Override
-                    public void run() {
-                        hideCommentView();
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final Activity activity = (Activity) param.thisObject;
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                hideCommentView();
+                            }
+                        });
+                        lastClickedView = null;
                     }
                 });
-                lastClickedView = null;
-            }
-        });
-        XposedHelpers.findAndHookMethod("com.xingin.comment.input.ui.NoteCommentActivity", lpparam.classLoader, "onPause", new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                final Activity activity = (Activity) param.thisObject;
-                activity.runOnUiThread(new Runnable() {
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader, "onPause",
+                new XC_MethodHook() {
                     @Override
-                    public void run() {
-                        hideCommentView();
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final Activity activity = (Activity) param.thisObject;
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                hideCommentView();
+                            }
+                        });
+                        lastClickedView = null;
                     }
                 });
-                lastClickedView = null;
-            }
-        });
         XposedHelpers.findAndHookMethod(
                 "com.xingin.matrix.notedetail.NoteDetailActivity",
                 lpparam.classLoader,
                 "onCreate",
                 Bundle.class,
                 new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                detailActivity = (Activity) param.thisObject;
-            }
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        detailActivity = (Activity) param.thisObject;
+                    }
         });
     }
 }
