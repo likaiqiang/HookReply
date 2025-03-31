@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.Spanned;
 import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -612,6 +613,7 @@ public class ViewHierarchyOverlay {
 
             if (info.view instanceof TextView) {
                 sb.append("文本: ").append(((TextView) info.view).getText()).append("\n\n");
+                sb.append("Spanned: ").append(info.spannedInfo).append("\n\n");
             }
 
 //            try {
@@ -688,6 +690,7 @@ public class ViewHierarchyOverlay {
         /**
          * 递归收集视图信息
          */
+        @SuppressLint("DefaultLocale")
         private void collectViewInfoRecursive(View view) {
             // 获取视图在屏幕上的位置
             int[] location = new int[2];
@@ -702,6 +705,36 @@ public class ViewHierarchyOverlay {
             info.height = view.getHeight();
             info.className = view.getClass().getSimpleName();
             info.nativeClassName = getAndroidViewClassName(view);
+
+            if (view instanceof TextView) {
+                TextView textView = (TextView) view;
+                CharSequence text = textView.getText();
+
+                if (text instanceof Spanned) {
+                    Spanned spannedText = (Spanned) text;
+                    Object[] spans = spannedText.getSpans(0, text.length(), Object.class);
+
+                    StringBuilder spanInfo = new StringBuilder("\n");
+                    int index = 0;
+                    for (Object span : spans) {
+                        int start = spannedText.getSpanStart(span);
+                        int end = spannedText.getSpanEnd(span);
+
+                        CharSequence spannedSubText = spannedText.subSequence(start, end);
+
+                        // 处理 SimpleName 可能为空的情况
+                        String spanClassName = span.getClass().getSimpleName();
+                        if (spanClassName.isEmpty()) {
+                            spanClassName = span.getClass().getName(); // 获取完整类名
+                        }
+
+                        spanInfo.append(String.format("#%d → %s [%d-%d]: \"%s\"\n",
+                                index + 1, spanClassName, start, end, spannedSubText));
+                        index++;
+                    }
+                    info.spannedInfo = spanInfo.toString(); // 记录 Spanned 相关信息
+                }
+            }
 
             // 添加到列表
             viewInfoList.add(info);
@@ -789,6 +822,7 @@ public class ViewHierarchyOverlay {
             int height;
             String className;
             String nativeClassName;
+            String spannedInfo;
         }
     }
 }

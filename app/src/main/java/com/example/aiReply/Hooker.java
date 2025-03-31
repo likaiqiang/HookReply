@@ -8,6 +8,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Spannable;
+import android.text.Spanned;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -41,6 +43,7 @@ import okhttp3.Response;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
@@ -48,6 +51,8 @@ import java.util.concurrent.TimeUnit;
 
 public class Hooker implements IXposedHookLoadPackage {
     private static View lastClickedView = null;
+    private static Float lastUpX;
+    private static Float lastUpY;
 
     private boolean isCommentViewVisible = false;
     private CommentView commentViewLayout;
@@ -58,11 +63,31 @@ public class Hooker implements IXposedHookLoadPackage {
 
     CharSequence commentText;
     private Activity detailActivity;
+
+    private void logClassHierarchy(Object obj){
+        Class<?> clazz = obj.getClass();
+
+        // 遍历并打印继承链
+        while (clazz != null) {
+            // 打印当前类的类名
+            XposedBridge.log("Reflection 类名: "+ clazz.getName());
+            // 获取当前类的父类
+            clazz = clazz.getSuperclass();
+        }
+    }
+
+    private int getOffsetForPosition(TextView textView, float x, float y) {
+        if (textView.getLayout() == null) return -1;
+        int offsetX = (int) (x - textView.getTotalPaddingLeft() + textView.getScrollX());
+        int offsetY = (int) (y - textView.getTotalPaddingTop() + textView.getScrollY());
+
+        int line = textView.getLayout().getLineForVertical(offsetY);
+        return textView.getLayout().getOffsetForHorizontal(line, offsetX);
+    }
     private View findTargetView(ViewGroup parent, String className) {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
             String cn = child.getClass().getSimpleName();
-            XposedBridge.log("simpleName: " + cn);
 
             if (cn.equals(className)) {
                 // 找到 EditText 直接返回
@@ -88,7 +113,6 @@ public class Hooker implements IXposedHookLoadPackage {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
             String cn = child.getClass().getSimpleName();
-            XposedBridge.log("simpleName: " + cn);
 
             if (cn.equals(className)) {
                 // 找到匹配的视图，添加到结果列表
@@ -289,6 +313,149 @@ public class Hooker implements IXposedHookLoadPackage {
             setOrientation(VERTICAL);
         }
     }
+    private enum FieldMatchMode {
+        STARTS_WITH,
+        ENDS_WITH,
+        EQUALS,
+        CONTAINS
+    }
+    private static class FieldFinder {
+        private Object targetObject;
+        private String fieldTypeName;
+        private FieldMatchMode typeMatchMode;
+        private String fieldValueName;
+        private FieldMatchMode valueMatchMode;
+        private boolean enableLogging = false;
+
+        // 构造函数设置默认值
+        public FieldFinder() {
+            this.typeMatchMode = FieldMatchMode.EQUALS;
+            this.valueMatchMode = FieldMatchMode.EQUALS;
+        }
+
+        public FieldFinder setTargetObject(Object targetObject) {
+            this.targetObject = targetObject;
+            return this;
+        }
+
+        public FieldFinder setFieldTypeName(String fieldTypeName) {
+            this.fieldTypeName = fieldTypeName;
+            return this;
+        }
+
+        public FieldFinder setTypeMatchMode(FieldMatchMode typeMatchMode) {
+            this.typeMatchMode = typeMatchMode;
+            return this;
+        }
+
+        public FieldFinder setFieldValueName(String fieldValueName) {
+            this.fieldValueName = fieldValueName;
+            return this;
+        }
+
+        public FieldFinder setValueMatchMode(FieldMatchMode valueMatchMode) {
+            this.valueMatchMode = valueMatchMode;
+            return this;
+        }
+
+        public FieldFinder enableLogging(boolean enable) {
+            this.enableLogging = enable;
+            return this;
+        }
+
+        /**
+         * 根据配置的条件查找并返回匹配的字段
+         * @return 匹配的字段，如果未找到则返回null
+         * @throws IllegalArgumentException 如果必要参数缺失
+         * @throws IllegalAccessException 如果无法访问字段
+         */
+        public Field find() throws IllegalArgumentException, IllegalAccessException {
+            // 验证必要参数
+            if (targetObject == null) {
+                throw new IllegalArgumentException("Target object cannot be null");
+            }
+
+            if (fieldTypeName == null && fieldValueName == null) {
+                throw new IllegalArgumentException("Either field type name or value name must be specified");
+            }
+
+            Class<?> clazz = targetObject.getClass();
+            Field[] fields = clazz.getDeclaredFields();
+
+            for (Field field : fields) {
+                field.setAccessible(true);
+
+                // 检查类型匹配
+                boolean typeMatched = true;
+                if (fieldTypeName != null) {
+                    Class<?> fieldType = field.getType();
+                    String typeName = fieldType.getName();
+
+                    if (enableLogging) {
+                        XposedBridge.log("Field: " + field.getName() + ", Type: " + typeName);
+                    }
+
+                    switch (typeMatchMode) {
+                        case STARTS_WITH:
+                            typeMatched = typeName.startsWith(fieldTypeName);
+                            break;
+                        case ENDS_WITH:
+                            typeMatched = typeName.endsWith(fieldTypeName);
+                            break;
+                        case CONTAINS:
+                            typeMatched = typeName.contains(fieldTypeName);
+                            break;
+                        case EQUALS:
+                        default:
+                            typeMatched = typeName.equals(fieldTypeName);
+                            break;
+                    }
+
+                    if (!typeMatched) {
+                        continue; // 类型不匹配，跳过此字段
+                    }
+                }
+
+                // 检查字段名称匹配
+                boolean valueMatched = true;
+                if (fieldValueName != null) {
+                    String fieldName = field.getName();
+
+                    if (enableLogging) {
+                        XposedBridge.log("Checking field name: " + fieldName);
+                    }
+
+                    switch (valueMatchMode) {
+                        case STARTS_WITH:
+                            valueMatched = fieldName.startsWith(fieldValueName);
+                            break;
+                        case ENDS_WITH:
+                            valueMatched = fieldName.endsWith(fieldValueName);
+                            break;
+                        case CONTAINS:
+                            valueMatched = fieldName.contains(fieldValueName);
+                            break;
+                        case EQUALS:
+                        default:
+                            valueMatched = fieldName.equals(fieldValueName);
+                            break;
+                    }
+                }
+
+                if (typeMatched && valueMatched) {
+                    if (enableLogging) {
+                        XposedBridge.log("Found matching field: " + field.getName());
+                    }
+                    return field;
+                }
+            }
+
+            if (enableLogging) {
+                XposedBridge.log("No matching field found");
+            }
+            return null;
+        }
+    }
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
         // 记录当前加载的应用包名，方便调试
@@ -325,12 +492,29 @@ public class Hooker implements IXposedHookLoadPackage {
                                 float deltaX = Math.abs(upX - downX);
                                 float deltaY = Math.abs(upY - downY);
 
+                                lastUpX = upX;
+                                lastUpY = upY;
+
                                 // 设定点击的阈值（时间 & 移动距离）
                                 if (duration < 200 && deltaX < 10 && deltaY < 10) {
                                     XposedBridge.log("performClick view: " + view.getClass().getSimpleName());
                                     XposedBridge.log("lastClickedView: " + lastClickedView);
                                     if(view.getClass().getSimpleName().equals("HandlePressStateCommentTextView")){
                                         lastClickedView = view;
+
+//                                        Layout layout = ((TextView) lastClickedView).getLayout();
+//                                        if (layout != null) {
+//                                            Spannable spannable = new SpannableString(((TextView) lastClickedView).getText());
+//                                            Object[] spans = spannable.getSpans(0, spannable.length(), Object.class);
+//                                            for (Object span : spans) {
+//                                                int start = spannable.getSpanStart(span);
+//                                                int end = spannable.getSpanEnd(span);
+//                                                String subText = spannable.subSequence(start, end).toString();
+//                                                XposedBridge.log("Span 类型: " + span.getClass().getSimpleName() + ", 文本: " + subText);
+//                                            }
+//                                        }
+
+
 
                                         if (detailActivity != null) {
                                             ViewGroup rootView = (ViewGroup) detailActivity.getWindow().getDecorView();
@@ -380,7 +564,93 @@ public class Hooker implements IXposedHookLoadPackage {
                                 showCommentView(activity, commentText);
                             }
                             XposedBridge.log("comment text: " + commentText);
-                            XposedBridge.log("editText view: " + editTextView);
+                            XposedBridge.log("commentText classname: " + commentText.getClass().getSimpleName());
+
+                            if(commentText instanceof Spannable){
+                                Spanned spannedText = (Spanned) commentText;
+                                Object[] spans = spannedText.getSpans(0, commentText.length(), Object.class);
+                                for (Object span : spans) {
+                                    String spanClassName = span.getClass().getName();
+                                    XposedBridge.log("span classname: " + spanClassName);
+                                    if(spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2$") || spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.ParentCommentBinderV2$")){
+
+                                        Field gm6Field = new FieldFinder()
+                                                .setTargetObject(span)
+                                                .setFieldTypeName("gm6")
+                                                .setTypeMatchMode(FieldMatchMode.STARTS_WITH)
+                                                .find();
+                                        if(gm6Field != null){
+                                            XposedBridge.log("gm6 field: " + gm6Field.getName());
+                                            Object gm6Value = gm6Field.get(span);
+                                            assert gm6Value != null;
+                                            Field commentCommentInfoField = new FieldFinder()
+                                                    .setTargetObject(gm6Value)
+                                                    .setFieldTypeName("CommentCommentInfo")
+                                                    .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                                                    .find();
+                                            if(commentCommentInfoField != null){
+                                                XposedBridge.log("commentCommentInfo field: " + commentCommentInfoField.getName());
+
+                                                Object commentCommentInfoFieldValue = commentCommentInfoField.get(gm6Value);
+
+                                                assert commentCommentInfoFieldValue != null;
+                                                Field commentCommentInfoTargetCommentField = new FieldFinder()
+                                                        .setTargetObject(commentCommentInfoFieldValue)
+                                                        .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                                                        .setFieldTypeName("CommentCommentInfoTargetComment")
+                                                        .find();
+                                                if(commentCommentInfoTargetCommentField != null){
+                                                    XposedBridge.log("commentCommentInfoTargetComment field: " + commentCommentInfoTargetCommentField.getName());
+
+                                                    Object commentCommentInfoTargetCommentFieldValue = commentCommentInfoTargetCommentField.get(commentCommentInfoFieldValue);
+
+                                                    assert commentCommentInfoTargetCommentFieldValue != null;
+                                                    Field CommentCommentUserField = new FieldFinder()
+                                                            .setTargetObject(commentCommentInfoTargetCommentFieldValue)
+                                                            .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                                                            .setFieldTypeName("CommentCommentUser")
+                                                            .find();
+                                                    if(CommentCommentUserField != null){
+                                                        XposedBridge.log("CommentCommentUser field: " + CommentCommentUserField.getName());
+                                                        Object CommentCommentUserFieldValue = CommentCommentUserField.get(commentCommentInfoTargetCommentFieldValue);
+
+                                                        assert CommentCommentUserFieldValue != null;
+                                                        Field userId = new FieldFinder()
+                                                                .setTargetObject(CommentCommentUserFieldValue)
+                                                                .setFieldTypeName("java.lang.String")
+                                                                .setTypeMatchMode(FieldMatchMode.EQUALS)
+                                                                .setFieldValueName("userid")
+                                                                .setValueMatchMode(FieldMatchMode.EQUALS).find();
+
+                                                        if(userId != null){
+                                                            XposedBridge.log("userId field: " + userId.getName());
+                                                            Object idValue = userId.get(CommentCommentUserFieldValue);
+                                                            XposedBridge.log("userId value: " + idValue);
+                                                            break;
+                                                        }
+                                                        else {
+                                                            XposedBridge.log("userId field not found");
+                                                        }
+                                                    }
+                                                    else{
+                                                        XposedBridge.log("CommentCommentUser field not found");
+                                                    }
+                                                }
+                                                else{
+                                                    XposedBridge.log("commentCommentInfoTargetCommentField field not found");
+                                                }
+                                            }
+                                            else {
+                                                XposedBridge.log("commentCommentInfoField field not found");
+                                            }
+                                        }
+                                        else {
+                                            XposedBridge.log("gm6 field not found");
+                                        }
+                                    }
+                                }
+                            }
+
                         }
 
                         lastClickedView = null;
