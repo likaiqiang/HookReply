@@ -276,66 +276,65 @@ public class Hooker implements IXposedHookLoadPackage {
                                 Class<?> recyclerViewClass = commentRecyclerView.getClass();
                                 Method findContainingViewHolderMethod = recyclerViewClass.getMethod("findContainingViewHolder",View.class);
                                 Object holder = findContainingViewHolderMethod.invoke(commentRecyclerView, lastClickedView);
-                                assert holder != null;
+                                if(holder != null){
+                                    String holderName = holder.getClass().getSimpleName();
 
-                                String holderName = holder.getClass().getSimpleName();
+                                    XposedBridge.log("holder classname: " + holderName);
 
-                                XposedBridge.log("holder classname: " + holderName);
-
-                                Map<Object, Object> targetViewHolderCommentMap = holderName.startsWith("Parent") ? parentViewHolderCommentMap : subViewHolderCommentMap;
-                                Map<String, Object> targetCommentIdToViewHolderMap = holderName.startsWith("Parent") ? parentCommentIdToViewHolderMap : subCommentIdToViewHolderMap;
+                                    Map<Object, Object> targetViewHolderCommentMap = holderName.startsWith("Parent") ? parentViewHolderCommentMap : subViewHolderCommentMap;
+                                    Map<String, Object> targetCommentIdToViewHolderMap = holderName.startsWith("Parent") ? parentCommentIdToViewHolderMap : subCommentIdToViewHolderMap;
 
 
-                                ArrayList<String> context = new ArrayList<>();
+                                    ArrayList<String> context = new ArrayList<>();
 
-                                if(!holderName.startsWith("Parent")){
-                                    HashMap<String, Object> userMap = (HashMap<String, Object>) subViewHolderCommentMap.get(holder);
-                                    String commentContent = (String) userMap.get("content");
-                                    String commentTargetId = (String) userMap.get("commentTargetId");
-                                    String commentId = (String) userMap.get("id");
+                                    if(!holderName.startsWith("Parent")){
+                                        HashMap<String, Object> userMap = (HashMap<String, Object>) subViewHolderCommentMap.get(holder);
+                                        String commentContent = (String) userMap.get("content");
+                                        String commentTargetId = (String) userMap.get("commentTargetId");
+                                        String commentId = (String) userMap.get("id");
 
-                                    if (commentContent != null) {
-                                        context.add(commentContent);
-                                    }
-
-                                    Integer index = 0;
-                                    while (commentTargetId != null) {
-                                        XposedBridge.log("commentTargetId " + index + ": " + commentTargetId);
-                                        XposedBridge.log("commentId: " + index + ": " + commentId);
-                                        XposedBridge.log("context " + index + ": " + context);
-
-                                        HashMap<String, Object> commentMap = (HashMap<String, Object>) subCommentIdToViewHolderMap.get(commentTargetId);
-                                        if (commentMap == null) {
-                                            break;
-                                        }
-
-                                        commentContent = (String) commentMap.get("content");
                                         if (commentContent != null) {
                                             context.add(commentContent);
                                         }
 
-                                        commentTargetId = (String) commentMap.get("commentTargetId");
-                                        commentId = (String) commentMap.get("id");
-                                        index++;
+                                        Integer index = 0;
+                                        while (commentTargetId != null) {
+                                            XposedBridge.log("commentTargetId " + index + ": " + commentTargetId);
+                                            XposedBridge.log("commentId: " + index + ": " + commentId);
+                                            XposedBridge.log("context " + index + ": " + context);
+
+                                            HashMap<String, Object> commentMap = (HashMap<String, Object>) subCommentIdToViewHolderMap.get(commentTargetId);
+                                            if (commentMap == null) {
+                                                break;
+                                            }
+
+                                            commentContent = (String) commentMap.get("content");
+                                            if (commentContent != null) {
+                                                context.add(commentContent);
+                                            }
+
+                                            commentTargetId = (String) commentMap.get("commentTargetId");
+                                            commentId = (String) commentMap.get("id");
+                                            index++;
+                                        }
+                                        HashMap<String, Object> parentMap = (HashMap<String, Object>) parentCommentIdToViewHolderMap.get(commentId);
+                                        commentContent = (String) parentMap.get("content");
+                                        if (commentContent != null) {
+                                            context.add(commentContent);
+                                        }
                                     }
-                                    HashMap<String, Object> parentMap = (HashMap<String, Object>) parentCommentIdToViewHolderMap.get(commentId);
-                                    commentContent = (String) parentMap.get("content");
-                                    if (commentContent != null) {
-                                        context.add(commentContent);
+                                    else{
+                                        HashMap<String, Object> userMap = (HashMap<String, Object>) parentViewHolderCommentMap.get(holder);
+                                        String commentContent = (String) userMap.get("content");
+                                        if (commentContent != null) {
+                                            context.add(commentContent);
+                                        }
                                     }
+                                    XposedBridge.log("context: " + context);
                                 }
-                                else{
-                                    HashMap<String, Object> userMap = (HashMap<String, Object>) parentViewHolderCommentMap.get(holder);
-                                    String commentContent = (String) userMap.get("content");
-                                    if (commentContent != null) {
-                                        context.add(commentContent);
-                                    }
-                                }
-                                XposedBridge.log("context: " + context);
 
                             }
                         }
-
                         lastClickedView = null;
                     }
                 }
@@ -549,37 +548,38 @@ public class Hooker implements IXposedHookLoadPackage {
                     if (!response.isSuccessful()) {
                         throw new IOException("Unexpected code " + response);
                     }
-                    assert response.body() != null;
-                    String responseBody = response.body().string();
-                    XposedBridge.log("Response: "+responseBody);
-                    try {
-                        // 解析 JSON 对象
-                        JSONObject jsonObject = new JSONObject(responseBody);
+                    if(response.body() != null){
+                        String responseBody = response.body().string();
+                        XposedBridge.log("Response: "+responseBody);
+                        try {
+                            // 解析 JSON 对象
+                            JSONObject jsonObject = new JSONObject(responseBody);
 
-                        // 获取 "choices" 数组
-                        JSONArray choicesArray = jsonObject.getJSONArray("choices");
+                            // 获取 "choices" 数组
+                            JSONArray choicesArray = jsonObject.getJSONArray("choices");
 
-                        // 确保数组至少有一个元素
-                        if (choicesArray.length() > 0) {
-                            JSONObject firstChoice = choicesArray.getJSONObject(0);  // 取第一个元素
+                            // 确保数组至少有一个元素
+                            if (choicesArray.length() > 0) {
+                                JSONObject firstChoice = choicesArray.getJSONObject(0);  // 取第一个元素
 
-                            // 获取 "message" 对象
-                            JSONObject messageObject = firstChoice.getJSONObject("message");
+                                // 获取 "message" 对象
+                                JSONObject messageObject = firstChoice.getJSONObject("message");
 
-                            // 获取 "content" 字段
-                            String content = messageObject.getString("content");
+                                // 获取 "content" 字段
+                                String content = messageObject.getString("content");
 
-                            // 打印 content
-                            XposedBridge.log("Content: " + content);
-                            XposedBridge.log(String.valueOf(hooker.editTextView));
-                            new Handler(Looper.getMainLooper()).post(() -> {
-                                hooker.editTextView.setText(content);
-                            });
-                        } else {
-                            XposedBridge.log("Choices array is empty!");
+                                // 打印 content
+                                XposedBridge.log("Content: " + content);
+                                XposedBridge.log(String.valueOf(hooker.editTextView));
+                                new Handler(Looper.getMainLooper()).post(() -> {
+                                    hooker.editTextView.setText(content);
+                                });
+                            } else {
+                                XposedBridge.log("Choices array is empty!");
+                            }
+                        } catch (JSONException e) {
+                            XposedBridge.log("JSON Parsing Error: " + e.getMessage());
                         }
-                    } catch (JSONException e) {
-                        XposedBridge.log("JSON Parsing Error: " + e.getMessage());
                     }
                 }
             });
