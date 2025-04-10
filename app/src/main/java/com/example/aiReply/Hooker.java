@@ -1,24 +1,17 @@
 package com.example.aiReply;
 
-import static com.example.aiReply.ViewFinder.findChild;
 import static com.example.aiReply.ViewFinder.findParent;
-import static com.example.aiReply.ViewFinder.getAllChildrenInRecycler;
 
 import android.app.Activity;
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapShader;
-import android.graphics.Canvas;
-import android.graphics.Paint;
+
 import android.graphics.PixelFormat;
 import android.graphics.Point;
-import android.graphics.Shader;
+
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.Spannable;
-import android.text.Spanned;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -32,7 +25,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
-import androidx.recyclerview.widget.RecyclerView;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -40,7 +32,6 @@ import org.json.JSONObject;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -52,24 +43,18 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Objects;
 import java.util.Set;
-import java.util.WeakHashMap;
 import java.util.concurrent.TimeUnit;
-import com.alibaba.fastjson.JSON;
 import java.util.Map;
-import java.lang.annotation.Annotation;
 
 
 public class Hooker implements IXposedHookLoadPackage {
@@ -94,17 +79,6 @@ public class Hooker implements IXposedHookLoadPackage {
     private static final Map<Object, Object> parentViewHolderCommentMap = new HashMap<>();
     private static final Map<String, Object> parentCommentIdToViewHolderMap = new HashMap<>();
 
-    private void logClassHierarchy(Object obj){
-        Class<?> clazz = obj.getClass();
-
-        // 遍历并打印继承链
-        while (clazz != null) {
-            // 打印当前类的类名
-            XposedBridge.log("Reflection 类名: "+ clazz.getName());
-            // 获取当前类的父类
-            clazz = clazz.getSuperclass();
-        }
-    }
     private void hookViewHolder(Class<?> clazz, Boolean enableLog ){
         String type = clazz.getSimpleName().startsWith("Parent") ? "parent" : "sub";
         for (Method m : clazz.getDeclaredMethods()) {
@@ -203,225 +177,9 @@ public class Hooker implements IXposedHookLoadPackage {
         );
         hookViewHolder(subCommentBinderClazz, false);
         hookViewHolder(parentCommentBinderClazz, true);
-//        Class<?> viewHolderClass = Class.forName(
-//                "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2$SubCommentViewHolder",
-//                false,
-//                lpparam.classLoader
-//        );
-//        Class<?> dataClass = Class.forName(
-//                "gm6.e",
-//                false,
-//                lpparam.classLoader
-//        );
-//
-//        Class<?> listClass = Class.forName("java.util.List", false, lpparam.classLoader);
-//
-//
-//        XposedHelpers.findAndHookMethod(
-//                "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2",
-//                lpparam.classLoader,
-//                "onBindViewHolder",
-//                viewHolderClass,
-//                dataClass,
-//                listClass,
-//                new XC_MethodHook() {
-//                    @Override
-//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-//                        Object viewHolder = param.args[0];
-//                        Object user = param.args[1];
-//                        XposedBridge.log("onBindViewHolder:  " + user);
-//                    }
-//                }
-//        );
-
-
-
-//        XposedHelpers.findAndHookMethod(
-//        "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2",
-//                lpparam.classLoader,
-//                "onBindViewHolder",
-//                viewHolderClass,
-//                dataClass,
-//                new XC_MethodHook() {
-//                    @Override
-//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-//                        Object viewHolder = param.args[0];
-//                        XposedBridge.log("onBindViewHolder+++");
-//                    }
-//                }
-//        );
-
-        //        RecyclerViewClickTracker.init(lpparam);
-
-
-//        XposedHelpers.findAndHookMethod(
-//                "android.view.View",
-//                lpparam.classLoader,
-//                "setOnClickListener",
-//                "android.view.View$OnClickListener",
-//                new XC_MethodHook() {
-//                    @Override
-//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-//                        View view = (View) param.thisObject;
-//                        Object listener = param.args[0];
-//
-//                        if(view.getClass().getSimpleName().equals("XYAvatarView")){
-//                            View.OnClickListener originalListener = (View.OnClickListener) listener;
-//
-//                            View.OnClickListener wrappedListener = new View.OnClickListener(){
-//                                @Override
-//                                public void onClick(View view) {
-//                                    XposedBridge.log("click XYAvatarView");
-//                                    try{
-//                                        Field avatarField = view.getClass().getDeclaredField("avatarBitmap");
-//                                        avatarField.setAccessible(true);
-//                                        Object bitmap = avatarField.get(view);
-//                                        XposedBridge.log("found bitmap: " + bitmap);
-//
-//                                        Field avatarDataSourceField = view.getClass().getDeclaredField("avatarDataSource");
-//                                        avatarDataSourceField.setAccessible(true);
-//                                        Object avatarDataSource = avatarDataSourceField.get(view);
-//                                        XposedBridge.log("found avatarDataSource: " + avatarDataSource);
-//                                    }  catch (NoSuchFieldException | IllegalAccessException e) {
-//                                        throw new RuntimeException(e);
-//                                    }
-//
-//
-////                                    originalListener.onClick(view);
-//                                }
-//
-//                            };
-//                            param.args[0] = wrappedListener;
-//                        }
-//
-//                    }
-//                }
-//        );
-
 
 
         ViewHierarchyOverlay.init(lpparam);
-//        RecyclerViewClickTracker.init(lpparam);
-
-//        XposedHelpers.findAndHookMethod(
-//                "com.xingin.redview.XYAvatarView",
-//                lpparam.classLoader,
-//                "drawAvatar",
-//                Canvas.class,
-//                new XC_MethodHook() {
-////                    @Override
-////                    protected Object replaceHookedMethod(MethodHookParam methodHookParam) throws Throwable {
-////                        XposedBridge.log("replaceHookedMethod" + Build.VERSION.SDK_INT);
-////                        Canvas canvas = (Canvas) methodHookParam.args[0];
-////                        Object thisObject = methodHookParam.thisObject;
-////                        canvas.save();
-////                        BitmapShader
-//////                        float f104 = thisObject.centerX;
-//////                        float f105 = thisObject.radius;
-//////                        canvas.translate(f104 - f105, this.centerY - f105);
-//////                        float f106 = this.scaleAvatar;
-//////                        float f107 = this.centerY;
-//////                        canvas.scale(f106, f106, f107, f107);
-//////                        float f108 = this.radius;
-//////                        canvas.drawCircle(f108, f108, f108, this.avatarPaint);
-//////                        if (!this.borderDisable) {
-//////                            float f109 = this.radius;
-//////                            canvas.drawCircle(f109, f109, this.scaleAvatar * f109, this.paintAvatarBorder);
-//////                        }
-//////                        canvas.restore();
-////
-////                        return thisObject;
-////                    };
-//                    @Override
-//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-//                        XposedBridge.log("XYAvatarView.dispatchDraw被调用");
-//                        Object thisObject = param.thisObject;
-////                        Field avatarBitmapField = XposedHelpers.findField(thisObject.getClass(), "avatarBitmap");
-////                        Bitmap avatarBitmap = (Bitmap) avatarBitmapField.get(thisObject);
-////
-////                        if (avatarBitmap != null) {
-////                            XposedBridge.log("成功获取到XYAvatarView的avatarBitmap");
-////                        } else {
-////                            XposedBridge.log("avatarBitmap为null");
-////                        }
-//                        Field paintField = XposedHelpers.findField(thisObject.getClass(), "avatarPaint");
-//                        paintField.setAccessible(true);
-//                        Paint avatarPaint = (Paint) paintField.get(thisObject);
-//
-//                        if(avatarPaint != null){
-//                            Shader shader = avatarPaint.getShader();
-//                            if(shader instanceof BitmapShader){
-//                                Field mBitmapField = XposedHelpers.findField(shader.getClass(), "mBitmap");
-//                                mBitmapField.setAccessible(true);
-//
-//                                Bitmap bp = (Bitmap) mBitmapField.get(shader);
-//                                if(bp != null){
-//                                    XposedBridge.log("found bitmap");
-//                                }
-////                                Field[] fields = shader.getClass().getDeclaredFields();
-//                                for(Field field: fields){
-//                                    field.setAccessible(true);
-//                                    String fieldName = field.getName();
-//                                    Object fieldValue = field.get(shader);
-//
-//                                    XposedBridge.log("字段: " + fieldName + ", 类型: " +
-//                                            (fieldValue != null ? fieldValue.getClass().getName() : "null") +
-//                                            ", 值: " + fieldValue);
-//                                }
-//                            }
-//                        }
-//
-//
-//
-//
-//                    }
-//                }
-//        );
-
-
-//        XposedHelpers.findAndHookMethod(
-//                "android.view.View",
-//                lpparam.classLoader,
-//                "setOnClickListener",
-//                "android.view.View$OnClickListener",
-//                new XC_MethodHook() {
-//                    @Override
-//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-//                        View view = (View) param.thisObject;
-//                        Object listener = param.args[0];
-//
-//                        if(view.getClass().getSimpleName().equals("XYAvatarView")){
-//                            View.OnClickListener originalListener = (View.OnClickListener) listener;
-//
-//                            View.OnClickListener wrappedListener = new View.OnClickListener(){
-//                                @Override
-//                                public void onClick(View view) {
-//                                    XposedBridge.log("click XYAvatarView");
-//                                    try{
-//                                        Field avatarField = view.getClass().getDeclaredField("avatarBitmap");
-//                                        avatarField.setAccessible(true);
-//                                        Object bitmap = avatarField.get(view);
-//                                        XposedBridge.log("found bitmap: " + bitmap);
-//
-//                                        Field avatarDataSourceField = view.getClass().getDeclaredField("avatarDataSource");
-//                                        avatarDataSourceField.setAccessible(true);
-//                                        Object avatarDataSource = avatarDataSourceField.get(view);
-//                                        XposedBridge.log("found avatarDataSource: " + avatarDataSource);
-//                                    }  catch (NoSuchFieldException | IllegalAccessException e) {
-//                                        throw new RuntimeException(e);
-//                                    }
-//
-//
-////                                    originalListener.onClick(view);
-//                                }
-//
-//                            };
-//                            param.args[0] = wrappedListener;
-//                        }
-//
-//                    }
-//                }
-//        );
 
         XposedHelpers.findAndHookMethod("android.view.View", lpparam.classLoader,
                 "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
@@ -647,14 +405,6 @@ public class Hooker implements IXposedHookLoadPackage {
                 });
     }
 
-    private int getOffsetForPosition(TextView textView, float x, float y) {
-        if (textView.getLayout() == null) return -1;
-        int offsetX = (int) (x - textView.getTotalPaddingLeft() + textView.getScrollX());
-        int offsetY = (int) (y - textView.getTotalPaddingTop() + textView.getScrollY());
-
-        int line = textView.getLayout().getLineForVertical(offsetY);
-        return textView.getLayout().getOffsetForHorizontal(line, offsetX);
-    }
     private View findTargetView(ViewGroup parent, String className) {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
@@ -884,90 +634,6 @@ public class Hooker implements IXposedHookLoadPackage {
             setOrientation(VERTICAL);
         }
     }
-    private String foundUserid(Spanned spanned) throws IllegalAccessException {
-        Object[] spans = spanned.getSpans(0, commentText.length(), Object.class);
-        for (Object span : spans) {
-            String spanClassName = span.getClass().getName();
-            XposedBridge.log("span classname: " + spanClassName);
-            if(spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2$") || spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.ParentCommentBinderV2$")){
-
-                Field gm6Field = new FieldFinder()
-                        .setTargetObject(span)
-                        .setFieldTypeName("gm6")
-                        .setTypeMatchMode(FieldMatchMode.STARTS_WITH)
-                        .find();
-                if(gm6Field != null){
-                    XposedBridge.log("gm6 field: " + gm6Field.getName());
-                    Object gm6Value = gm6Field.get(span);
-                    assert gm6Value != null;
-                    Field commentCommentInfoField = new FieldFinder()
-                            .setTargetObject(gm6Value)
-                            .setFieldTypeName("CommentCommentInfo")
-                            .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
-                            .find();
-                    if(commentCommentInfoField != null){
-                        XposedBridge.log("commentCommentInfo field: " + commentCommentInfoField.getName());
-
-                        Object commentCommentInfoFieldValue = commentCommentInfoField.get(gm6Value);
-
-                        assert commentCommentInfoFieldValue != null;
-                        Field commentCommentInfoTargetCommentField = new FieldFinder()
-                                .setTargetObject(commentCommentInfoFieldValue)
-                                .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
-                                .setFieldTypeName("CommentCommentInfoTargetComment")
-                                .find();
-                        if(commentCommentInfoTargetCommentField != null){
-                            XposedBridge.log("commentCommentInfoTargetComment field: " + commentCommentInfoTargetCommentField.getName());
-
-                            Object commentCommentInfoTargetCommentFieldValue = commentCommentInfoTargetCommentField.get(commentCommentInfoFieldValue);
-
-                            assert commentCommentInfoTargetCommentFieldValue != null;
-                            Field CommentCommentUserField = new FieldFinder()
-                                    .setTargetObject(commentCommentInfoTargetCommentFieldValue)
-                                    .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
-                                    .setFieldTypeName("CommentCommentUser")
-                                    .find();
-                            if(CommentCommentUserField != null){
-                                XposedBridge.log("CommentCommentUser field: " + CommentCommentUserField.getName());
-                                Object CommentCommentUserFieldValue = CommentCommentUserField.get(commentCommentInfoTargetCommentFieldValue);
-
-                                assert CommentCommentUserFieldValue != null;
-                                Field userId = new FieldFinder()
-                                        .setTargetObject(CommentCommentUserFieldValue)
-                                        .setFieldTypeName("java.lang.String")
-                                        .setTypeMatchMode(FieldMatchMode.EQUALS)
-                                        .setFieldValueName("userid")
-                                        .setValueMatchMode(FieldMatchMode.EQUALS).find();
-
-                                if(userId != null){
-                                    XposedBridge.log("userId field: " + userId.getName());
-                                    Object idValue = userId.get(CommentCommentUserFieldValue);
-                                    XposedBridge.log("userId value: " + idValue);
-                                    return (String) idValue;
-                                }
-                                else {
-                                    XposedBridge.log("userId field not found");
-                                }
-                            }
-                            else{
-                                XposedBridge.log("CommentCommentUser field not found");
-                            }
-                        }
-                        else{
-                            XposedBridge.log("commentCommentInfoTargetCommentField field not found");
-                        }
-                    }
-                    else {
-                        XposedBridge.log("commentCommentInfoField field not found");
-                    }
-                }
-                else {
-                    XposedBridge.log("gm6 field not found");
-                }
-            }
-        }
-        return null;
-    }
     private enum FieldMatchMode {
         STARTS_WITH,
         ENDS_WITH,
@@ -1113,5 +779,3 @@ public class Hooker implements IXposedHookLoadPackage {
         }
     }
 }
-
-// com.xingin.comment.input.ui.NoteCommentActivity
