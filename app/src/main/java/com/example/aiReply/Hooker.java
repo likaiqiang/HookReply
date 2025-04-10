@@ -88,8 +88,12 @@ public class Hooker implements IXposedHookLoadPackage {
     private Activity detailActivity;
     private View commentRecyclerView;
     private RecyclerViewSiblingsManager siblingsManager;
-    private static final Map<Object, Object> viewHolderCommentMap = new HashMap<>();
-    private static final Map<String, Object> commentIdToViewHolderMap = new HashMap<>();
+    private static final Map<Object, Object> subViewHolderCommentMap = new HashMap<>();
+    private static final Map<String, Object> subCommentIdToViewHolderMap = new HashMap<>();
+
+    private static final Map<Object, Object> parentViewHolderCommentMap = new HashMap<>();
+    private static final Map<String, Object> parentCommentIdToViewHolderMap = new HashMap<>();
+
     private void logClassHierarchy(Object obj){
         Class<?> clazz = obj.getClass();
 
@@ -102,6 +106,7 @@ public class Hooker implements IXposedHookLoadPackage {
         }
     }
     private void hookViewHolder(Class<?> clazz, Boolean enableLog ){
+        String type = clazz.getSimpleName().startsWith("Parent") ? "parent" : "sub";
         for (Method m : clazz.getDeclaredMethods()) {
             if (m.getName().equals("onBindViewHolder")) {
 
@@ -150,13 +155,24 @@ public class Hooker implements IXposedHookLoadPackage {
                             commentMap.put("id", commentId);
                             commentMap.put("content", content);
                             commentMap.put("user", user);
-                            viewHolderCommentMap.put(viewHolder, commentMap);
+                            if(type.equals("sub")){
+                                subViewHolderCommentMap.put(viewHolder, commentMap);
+                            }
+                            else{
+                                parentViewHolderCommentMap.put(viewHolder, commentMap);
+                            }
 
                             holderMap.put("content", content);
                             holderMap.put("viewHolder", viewHolder);
                             holderMap.put("user", user);
+                            holderMap.put("id", commentId);
                             holderMap.put("rootCommentId", rootCommentId);
-                            commentIdToViewHolderMap.put(commentId, holderMap);
+                            if(type.equals("sub")){
+                                subCommentIdToViewHolderMap.put(commentId, holderMap);
+                            }
+                            else{
+                                parentCommentIdToViewHolderMap.put(commentId, holderMap);
+                            }
 
                         }
                     }
@@ -503,60 +519,61 @@ public class Hooker implements IXposedHookLoadPackage {
                                 Method findContainingViewHolderMethod = recyclerViewClass.getMethod("findContainingViewHolder",View.class);
                                 Object holder = findContainingViewHolderMethod.invoke(commentRecyclerView, lastClickedView);
                                 assert holder != null;
-                                XposedBridge.log("holder classname: " + holder.getClass().getName());
 
-//                                Method getAdapterMethod = recyclerViewClass.getMethod("getAdapter");
-//                                Object adapter = getAdapterMethod.invoke(commentRecyclerView);
-//                                XposedBridge.log("adapter classname: " + adapter.getClass().getName());
+                                String holderName = holder.getClass().getSimpleName();
+
+                                XposedBridge.log("holder classname: " + holderName);
+
+                                Map<Object, Object> targetViewHolderCommentMap = holderName.startsWith("Parent") ? parentViewHolderCommentMap : subViewHolderCommentMap;
+                                Map<String, Object> targetCommentIdToViewHolderMap = holderName.startsWith("Parent") ? parentCommentIdToViewHolderMap : subCommentIdToViewHolderMap;
+
+
                                 ArrayList<String> context = new ArrayList<>();
-                                HashMap<String, Object> userMap = (HashMap<String, Object>) viewHolderCommentMap.get(holder);
-//                                String commentId = (String) userMap.get("id");
-                                String commentContent = (String) userMap.get("content");
-                                String commentTargetId = (String) userMap.get("commentTargetId");
 
-                                XposedBridge.log("commentIdToViewHolderMap keys: " + commentIdToViewHolderMap.keySet() );
+                                if(!holderName.startsWith("Parent")){
+                                    HashMap<String, Object> userMap = (HashMap<String, Object>) subViewHolderCommentMap.get(holder);
+                                    String commentContent = (String) userMap.get("content");
+                                    String commentTargetId = (String) userMap.get("commentTargetId");
+                                    String commentId = (String) userMap.get("id");
 
-
-                                if (commentContent != null) {
-                                    context.add(commentContent);
-                                }
-                                String rootCommentId = null;
-                                Integer index = 0;
-                                while (commentTargetId != null || rootCommentId != null) {
-                                    XposedBridge.log("commentTargetId " + index + ": " + commentTargetId);
-                                    XposedBridge.log("rootCommentId " + index + ": " + rootCommentId);
-                                    XposedBridge.log("context " + index + ": " + context);
-
-                                    HashMap<String, Object> commentMap = (HashMap<String, Object>) commentIdToViewHolderMap.get(commentTargetId);
-                                    if (commentMap == null) {
-                                        commentMap = (HashMap<String, Object>) commentIdToViewHolderMap.get(rootCommentId);
-                                        if (commentMap == null) {
-                                            break;
-                                        }
-                                    }
-
-                                    commentContent = (String) commentMap.get("content");
                                     if (commentContent != null) {
                                         context.add(commentContent);
                                     }
 
-                                    commentTargetId = (String) commentMap.get("commentTargetId");
-                                    rootCommentId = (String) commentMap.get("rootCommentId");
-                                    index++;
+                                    Integer index = 0;
+                                    while (commentTargetId != null) {
+                                        XposedBridge.log("commentTargetId " + index + ": " + commentTargetId);
+                                        XposedBridge.log("commentId: " + index + ": " + commentId);
+                                        XposedBridge.log("context " + index + ": " + context);
+
+                                        HashMap<String, Object> commentMap = (HashMap<String, Object>) subCommentIdToViewHolderMap.get(commentTargetId);
+                                        if (commentMap == null) {
+                                            break;
+                                        }
+
+                                        commentContent = (String) commentMap.get("content");
+                                        if (commentContent != null) {
+                                            context.add(commentContent);
+                                        }
+
+                                        commentTargetId = (String) commentMap.get("commentTargetId");
+                                        commentId = (String) commentMap.get("id");
+                                        index++;
+                                    }
+                                    HashMap<String, Object> parentMap = (HashMap<String, Object>) parentCommentIdToViewHolderMap.get(commentId);
+                                    commentContent = (String) parentMap.get("content");
+                                    if (commentContent != null) {
+                                        context.add(commentContent);
+                                    }
                                 }
-
-//                                XposedBridge.log("context: " + context);
-
-//                                XposedBridge.log("clicked comment id: " + commentId);
-//                                XposedBridge.log("clicked comment content: " + commentContent);
-//                                XposedBridge.log("clicked commentTargetId: " + commentTargetId);
-//
-//
-//                                HashMap<String, Object> commentMap  = (HashMap<String, Object>) commentIdToViewHolderMap.get(commentTargetId);
-//                                String commentTargetContent = (String) commentMap.get("content");
-//
-//                                XposedBridge.log("clicked target comment id: " + commentId);
-//                                XposedBridge.log("clicked target comment content: " + commentTargetContent);
+                                else{
+                                    HashMap<String, Object> userMap = (HashMap<String, Object>) parentViewHolderCommentMap.get(holder);
+                                    String commentContent = (String) userMap.get("content");
+                                    if (commentContent != null) {
+                                        context.add(commentContent);
+                                    }
+                                }
+                                XposedBridge.log("context: " + context);
 
                             }
                         }
