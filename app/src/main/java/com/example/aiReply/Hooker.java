@@ -1,9 +1,18 @@
 package com.example.aiReply;
 
+import static com.example.aiReply.ViewFinder.findChild;
+import static com.example.aiReply.ViewFinder.findParent;
+import static com.example.aiReply.ViewFinder.getAllChildrenInRecycler;
+
 import android.app.Activity;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
+import android.graphics.Shader;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -23,6 +32,7 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -30,6 +40,7 @@ import org.json.JSONObject;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -40,13 +51,25 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Objects;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.TimeUnit;
+import com.alibaba.fastjson.JSON;
+import java.util.Map;
+import java.lang.annotation.Annotation;
 
 
 public class Hooker implements IXposedHookLoadPackage {
@@ -63,7 +86,10 @@ public class Hooker implements IXposedHookLoadPackage {
 
     CharSequence commentText;
     private Activity detailActivity;
-
+    private View commentRecyclerView;
+    private RecyclerViewSiblingsManager siblingsManager;
+    private static final Map<Object, Object> viewHolderCommentMap = new HashMap<>();
+    private static final Map<String, Object> commentIdToViewHolderMap = new HashMap<>();
     private void logClassHierarchy(Object obj){
         Class<?> clazz = obj.getClass();
 
@@ -74,6 +100,534 @@ public class Hooker implements IXposedHookLoadPackage {
             // 获取当前类的父类
             clazz = clazz.getSuperclass();
         }
+    }
+    private void hookViewHolder(Class<?> clazz, Boolean enableLog ){
+        for (Method m : clazz.getDeclaredMethods()) {
+            if (m.getName().equals("onBindViewHolder")) {
+
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if(enableLog){
+                            XposedBridge.log("onBindViewHolder hooked with args length = " + param.args.length);
+                        }
+
+                        Object viewHolder = param.args[0];
+                        Object user = param.args[1];
+
+                        Field commentCommentInfoField = new FieldFinder()
+                                .setTargetObject(user)
+                                .setFieldTypeName("CommentCommentInfo")
+                                .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                                .find();
+                        if(commentCommentInfoField !=null ){
+                            Object commentCommentInfoValue = commentCommentInfoField.get(user);
+                            String commentCommentInfoStr = Objects.requireNonNull(commentCommentInfoValue).toString();
+
+                            JSONObject extractFields = StringFieldExtractor.extractFieldsAsJson(commentCommentInfoStr, Set.of("id","content","rootCommentId"));
+                            if(enableLog){
+                                XposedBridge.log("extractFields: " + extractFields);
+                            }
+                            String content = extractFields.has("content") ? extractFields.getString("content") : null;
+                            String commentId = extractFields.has("id") ? extractFields.getString("id") : null;
+                            String rootCommentId = extractFields.has("rootCommentId") ? extractFields.getString("rootCommentId") : null;
+
+                            Field targetCommentField = commentCommentInfoValue.getClass().getDeclaredField("targetComment");
+                            targetCommentField.setAccessible(true);
+                            Object targetCommentValue = targetCommentField.get(commentCommentInfoValue);
+                            Map<String, Object> commentMap = new HashMap<>();
+                            Map<String, Object> holderMap = new HashMap<>();
+                            if(targetCommentValue !=null){
+                                Field commentTargetIdField = targetCommentValue.getClass().getDeclaredField("id");
+                                commentTargetIdField.setAccessible(true);
+                                String commentTargetId = (String) commentTargetIdField.get(targetCommentValue);
+
+                                commentMap.put("commentTargetId",commentTargetId);
+
+                                holderMap.put("commentTargetId", commentTargetId);
+
+                            }
+                            commentMap.put("id", commentId);
+                            commentMap.put("content", content);
+                            commentMap.put("user", user);
+                            viewHolderCommentMap.put(viewHolder, commentMap);
+
+                            holderMap.put("content", content);
+                            holderMap.put("viewHolder", viewHolder);
+                            holderMap.put("user", user);
+                            holderMap.put("rootCommentId", rootCommentId);
+                            commentIdToViewHolderMap.put(commentId, holderMap);
+
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    @Override
+    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
+        // 记录当前加载的应用包名，方便调试
+        XposedBridge.log("Xposed模块已加载到应用: " + lpparam.packageName);
+        ClassLoader targetClassLoader = lpparam.classLoader;
+
+        if (!lpparam.packageName.equals("com.xingin.xhs")) {
+            return;
+        }
+
+        Class<?> subCommentBinderClazz = Class.forName(
+                "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2",
+                false,
+                lpparam.classLoader
+        );
+        Class<?> parentCommentBinderClazz = Class.forName(
+                "com.xingin.matrix.v2.notedetail.itembinder.ParentCommentBinderV2",
+                false,
+                lpparam.classLoader
+        );
+        hookViewHolder(subCommentBinderClazz, false);
+        hookViewHolder(parentCommentBinderClazz, true);
+//        Class<?> viewHolderClass = Class.forName(
+//                "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2$SubCommentViewHolder",
+//                false,
+//                lpparam.classLoader
+//        );
+//        Class<?> dataClass = Class.forName(
+//                "gm6.e",
+//                false,
+//                lpparam.classLoader
+//        );
+//
+//        Class<?> listClass = Class.forName("java.util.List", false, lpparam.classLoader);
+//
+//
+//        XposedHelpers.findAndHookMethod(
+//                "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2",
+//                lpparam.classLoader,
+//                "onBindViewHolder",
+//                viewHolderClass,
+//                dataClass,
+//                listClass,
+//                new XC_MethodHook() {
+//                    @Override
+//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+//                        Object viewHolder = param.args[0];
+//                        Object user = param.args[1];
+//                        XposedBridge.log("onBindViewHolder:  " + user);
+//                    }
+//                }
+//        );
+
+
+
+//        XposedHelpers.findAndHookMethod(
+//        "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2",
+//                lpparam.classLoader,
+//                "onBindViewHolder",
+//                viewHolderClass,
+//                dataClass,
+//                new XC_MethodHook() {
+//                    @Override
+//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+//                        Object viewHolder = param.args[0];
+//                        XposedBridge.log("onBindViewHolder+++");
+//                    }
+//                }
+//        );
+
+        //        RecyclerViewClickTracker.init(lpparam);
+
+
+//        XposedHelpers.findAndHookMethod(
+//                "android.view.View",
+//                lpparam.classLoader,
+//                "setOnClickListener",
+//                "android.view.View$OnClickListener",
+//                new XC_MethodHook() {
+//                    @Override
+//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+//                        View view = (View) param.thisObject;
+//                        Object listener = param.args[0];
+//
+//                        if(view.getClass().getSimpleName().equals("XYAvatarView")){
+//                            View.OnClickListener originalListener = (View.OnClickListener) listener;
+//
+//                            View.OnClickListener wrappedListener = new View.OnClickListener(){
+//                                @Override
+//                                public void onClick(View view) {
+//                                    XposedBridge.log("click XYAvatarView");
+//                                    try{
+//                                        Field avatarField = view.getClass().getDeclaredField("avatarBitmap");
+//                                        avatarField.setAccessible(true);
+//                                        Object bitmap = avatarField.get(view);
+//                                        XposedBridge.log("found bitmap: " + bitmap);
+//
+//                                        Field avatarDataSourceField = view.getClass().getDeclaredField("avatarDataSource");
+//                                        avatarDataSourceField.setAccessible(true);
+//                                        Object avatarDataSource = avatarDataSourceField.get(view);
+//                                        XposedBridge.log("found avatarDataSource: " + avatarDataSource);
+//                                    }  catch (NoSuchFieldException | IllegalAccessException e) {
+//                                        throw new RuntimeException(e);
+//                                    }
+//
+//
+////                                    originalListener.onClick(view);
+//                                }
+//
+//                            };
+//                            param.args[0] = wrappedListener;
+//                        }
+//
+//                    }
+//                }
+//        );
+
+
+
+        ViewHierarchyOverlay.init(lpparam);
+//        RecyclerViewClickTracker.init(lpparam);
+
+//        XposedHelpers.findAndHookMethod(
+//                "com.xingin.redview.XYAvatarView",
+//                lpparam.classLoader,
+//                "drawAvatar",
+//                Canvas.class,
+//                new XC_MethodHook() {
+////                    @Override
+////                    protected Object replaceHookedMethod(MethodHookParam methodHookParam) throws Throwable {
+////                        XposedBridge.log("replaceHookedMethod" + Build.VERSION.SDK_INT);
+////                        Canvas canvas = (Canvas) methodHookParam.args[0];
+////                        Object thisObject = methodHookParam.thisObject;
+////                        canvas.save();
+////                        BitmapShader
+//////                        float f104 = thisObject.centerX;
+//////                        float f105 = thisObject.radius;
+//////                        canvas.translate(f104 - f105, this.centerY - f105);
+//////                        float f106 = this.scaleAvatar;
+//////                        float f107 = this.centerY;
+//////                        canvas.scale(f106, f106, f107, f107);
+//////                        float f108 = this.radius;
+//////                        canvas.drawCircle(f108, f108, f108, this.avatarPaint);
+//////                        if (!this.borderDisable) {
+//////                            float f109 = this.radius;
+//////                            canvas.drawCircle(f109, f109, this.scaleAvatar * f109, this.paintAvatarBorder);
+//////                        }
+//////                        canvas.restore();
+////
+////                        return thisObject;
+////                    };
+//                    @Override
+//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+//                        XposedBridge.log("XYAvatarView.dispatchDraw被调用");
+//                        Object thisObject = param.thisObject;
+////                        Field avatarBitmapField = XposedHelpers.findField(thisObject.getClass(), "avatarBitmap");
+////                        Bitmap avatarBitmap = (Bitmap) avatarBitmapField.get(thisObject);
+////
+////                        if (avatarBitmap != null) {
+////                            XposedBridge.log("成功获取到XYAvatarView的avatarBitmap");
+////                        } else {
+////                            XposedBridge.log("avatarBitmap为null");
+////                        }
+//                        Field paintField = XposedHelpers.findField(thisObject.getClass(), "avatarPaint");
+//                        paintField.setAccessible(true);
+//                        Paint avatarPaint = (Paint) paintField.get(thisObject);
+//
+//                        if(avatarPaint != null){
+//                            Shader shader = avatarPaint.getShader();
+//                            if(shader instanceof BitmapShader){
+//                                Field mBitmapField = XposedHelpers.findField(shader.getClass(), "mBitmap");
+//                                mBitmapField.setAccessible(true);
+//
+//                                Bitmap bp = (Bitmap) mBitmapField.get(shader);
+//                                if(bp != null){
+//                                    XposedBridge.log("found bitmap");
+//                                }
+////                                Field[] fields = shader.getClass().getDeclaredFields();
+//                                for(Field field: fields){
+//                                    field.setAccessible(true);
+//                                    String fieldName = field.getName();
+//                                    Object fieldValue = field.get(shader);
+//
+//                                    XposedBridge.log("字段: " + fieldName + ", 类型: " +
+//                                            (fieldValue != null ? fieldValue.getClass().getName() : "null") +
+//                                            ", 值: " + fieldValue);
+//                                }
+//                            }
+//                        }
+//
+//
+//
+//
+//                    }
+//                }
+//        );
+
+
+//        XposedHelpers.findAndHookMethod(
+//                "android.view.View",
+//                lpparam.classLoader,
+//                "setOnClickListener",
+//                "android.view.View$OnClickListener",
+//                new XC_MethodHook() {
+//                    @Override
+//                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+//                        View view = (View) param.thisObject;
+//                        Object listener = param.args[0];
+//
+//                        if(view.getClass().getSimpleName().equals("XYAvatarView")){
+//                            View.OnClickListener originalListener = (View.OnClickListener) listener;
+//
+//                            View.OnClickListener wrappedListener = new View.OnClickListener(){
+//                                @Override
+//                                public void onClick(View view) {
+//                                    XposedBridge.log("click XYAvatarView");
+//                                    try{
+//                                        Field avatarField = view.getClass().getDeclaredField("avatarBitmap");
+//                                        avatarField.setAccessible(true);
+//                                        Object bitmap = avatarField.get(view);
+//                                        XposedBridge.log("found bitmap: " + bitmap);
+//
+//                                        Field avatarDataSourceField = view.getClass().getDeclaredField("avatarDataSource");
+//                                        avatarDataSourceField.setAccessible(true);
+//                                        Object avatarDataSource = avatarDataSourceField.get(view);
+//                                        XposedBridge.log("found avatarDataSource: " + avatarDataSource);
+//                                    }  catch (NoSuchFieldException | IllegalAccessException e) {
+//                                        throw new RuntimeException(e);
+//                                    }
+//
+//
+////                                    originalListener.onClick(view);
+//                                }
+//
+//                            };
+//                            param.args[0] = wrappedListener;
+//                        }
+//
+//                    }
+//                }
+//        );
+
+        XposedHelpers.findAndHookMethod("android.view.View", lpparam.classLoader,
+                "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
+                    private float downX, downY;
+                    private long downTime;
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        MotionEvent event = (MotionEvent) param.args[0];
+                        View view = (View) param.thisObject;
+                        switch (event.getAction()) {
+                            case MotionEvent.ACTION_DOWN:
+                                downX = event.getRawX(); // 记录按下时的屏幕 X 坐标
+                                downY = event.getRawY(); // 记录按下时的屏幕 Y 坐标
+                                downTime = System.currentTimeMillis(); // 记录按下时间
+                                break;
+
+                            case MotionEvent.ACTION_UP:
+                                float upX = event.getRawX();
+                                float upY = event.getRawY();
+                                long upTime = System.currentTimeMillis();
+
+                                // 计算时间和位移
+                                long duration = upTime - downTime;
+                                float deltaX = Math.abs(upX - downX);
+                                float deltaY = Math.abs(upY - downY);
+
+                                lastUpX = upX;
+                                lastUpY = upY;
+
+                                // 设定点击的阈值（时间 & 移动距离）
+                                if (duration < 200 && deltaX < 10 && deltaY < 10) {
+                                    XposedBridge.log("performClick view: " + view.getClass().getSimpleName());
+                                    XposedBridge.log("lastClickedView: " + lastClickedView);
+                                    if(view.getClass().getSimpleName().equals("HandlePressStateCommentTextView")){
+                                        lastClickedView = view;
+
+                                        if (detailActivity != null) {
+                                            ViewGroup rootView = (ViewGroup) detailActivity.getWindow().getDecorView();
+                                            List<View> noteDetailTextViews = findTargetViews(rootView, "NoteDetailTextView");
+                                            XposedBridge.log("noteDetailTextViews: " + noteDetailTextViews);
+                                            StringBuilder noteText = new StringBuilder();
+                                            if(!noteDetailTextViews.isEmpty()){
+                                                for(View _view : noteDetailTextViews){
+                                                    noteText.append(((TextView) _view).getText()).append("。");
+                                                }
+                                            }
+                                            noteDetailText = noteText.toString();
+                                        }
+                                    }
+                                }
+                                break;
+                        }
+
+                    }
+                });
+
+
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader,
+                "onCreate",
+                Bundle.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Activity activity = (Activity) param.thisObject;
+                        XposedBridge.log("发现回复 Activity: " + activity.getClass().getName());
+                        XposedBridge.log("lastClickedView: " + lastClickedView);
+                        if(lastClickedView != null){
+                            ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
+                            View _editTextView = findTargetView(rootView, "RichEditTextPro");
+                            if(_editTextView != null){
+                                editTextView = (EditText) _editTextView;
+                            }
+                            else {
+                                editTextView = null;
+                            }
+
+                            commentText = ((TextView) lastClickedView).getText();
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                showCommentView(activity, commentText);
+                            }
+                            XposedBridge.log("comment text: " + commentText);
+                            XposedBridge.log("commentText classname: " + commentText.getClass().getSimpleName());
+
+                            View recycler = findParent(lastClickedView, view-> view.getClass().getSimpleName().equals("CommentListView"));
+                            if (recycler != null) {
+                                XposedBridge.log("recycler classname: " + recycler.getClass().getName());
+                                if(commentRecyclerView==null) {
+                                    commentRecyclerView = recycler;
+                                }
+
+                                Class<?> recyclerViewClass = commentRecyclerView.getClass();
+                                Method findContainingViewHolderMethod = recyclerViewClass.getMethod("findContainingViewHolder",View.class);
+                                Object holder = findContainingViewHolderMethod.invoke(commentRecyclerView, lastClickedView);
+                                assert holder != null;
+                                XposedBridge.log("holder classname: " + holder.getClass().getName());
+
+//                                Method getAdapterMethod = recyclerViewClass.getMethod("getAdapter");
+//                                Object adapter = getAdapterMethod.invoke(commentRecyclerView);
+//                                XposedBridge.log("adapter classname: " + adapter.getClass().getName());
+                                ArrayList<String> context = new ArrayList<>();
+                                HashMap<String, Object> userMap = (HashMap<String, Object>) viewHolderCommentMap.get(holder);
+//                                String commentId = (String) userMap.get("id");
+                                String commentContent = (String) userMap.get("content");
+                                String commentTargetId = (String) userMap.get("commentTargetId");
+
+                                XposedBridge.log("commentIdToViewHolderMap keys: " + commentIdToViewHolderMap.keySet() );
+
+
+                                if (commentContent != null) {
+                                    context.add(commentContent);
+                                }
+                                String rootCommentId = null;
+                                Integer index = 0;
+                                while (commentTargetId != null || rootCommentId != null) {
+                                    XposedBridge.log("commentTargetId " + index + ": " + commentTargetId);
+                                    XposedBridge.log("rootCommentId " + index + ": " + rootCommentId);
+                                    XposedBridge.log("context " + index + ": " + context);
+
+                                    HashMap<String, Object> commentMap = (HashMap<String, Object>) commentIdToViewHolderMap.get(commentTargetId);
+                                    if (commentMap == null) {
+                                        commentMap = (HashMap<String, Object>) commentIdToViewHolderMap.get(rootCommentId);
+                                        if (commentMap == null) {
+                                            break;
+                                        }
+                                    }
+
+                                    commentContent = (String) commentMap.get("content");
+                                    if (commentContent != null) {
+                                        context.add(commentContent);
+                                    }
+
+                                    commentTargetId = (String) commentMap.get("commentTargetId");
+                                    rootCommentId = (String) commentMap.get("rootCommentId");
+                                    index++;
+                                }
+
+//                                XposedBridge.log("context: " + context);
+
+//                                XposedBridge.log("clicked comment id: " + commentId);
+//                                XposedBridge.log("clicked comment content: " + commentContent);
+//                                XposedBridge.log("clicked commentTargetId: " + commentTargetId);
+//
+//
+//                                HashMap<String, Object> commentMap  = (HashMap<String, Object>) commentIdToViewHolderMap.get(commentTargetId);
+//                                String commentTargetContent = (String) commentMap.get("content");
+//
+//                                XposedBridge.log("clicked target comment id: " + commentId);
+//                                XposedBridge.log("clicked target comment content: " + commentTargetContent);
+
+                            }
+                        }
+
+                        lastClickedView = null;
+                    }
+                }
+        );
+
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader,
+                "onResume",
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final Activity activity = (Activity) param.thisObject;
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && lastClickedView != null) {
+                                    showCommentView(activity, commentText);
+                                }
+                            }
+                        });
+                    }
+                });
+
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader, "onDestroy",
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final Activity activity = (Activity) param.thisObject;
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                hideCommentView();
+                            }
+                        });
+                        lastClickedView = null;
+                    }
+                });
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.comment.input.ui.NoteCommentActivity",
+                lpparam.classLoader, "onPause",
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final Activity activity = (Activity) param.thisObject;
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                hideCommentView();
+                            }
+                        });
+                        lastClickedView = null;
+                    }
+                });
+        XposedHelpers.findAndHookMethod(
+                "com.xingin.matrix.notedetail.NoteDetailActivity",
+                lpparam.classLoader,
+                "onCreate",
+                Bundle.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        detailActivity = (Activity) param.thisObject;
+                    }
+                });
     }
 
     private int getOffsetForPosition(TextView textView, float x, float y) {
@@ -313,6 +867,90 @@ public class Hooker implements IXposedHookLoadPackage {
             setOrientation(VERTICAL);
         }
     }
+    private String foundUserid(Spanned spanned) throws IllegalAccessException {
+        Object[] spans = spanned.getSpans(0, commentText.length(), Object.class);
+        for (Object span : spans) {
+            String spanClassName = span.getClass().getName();
+            XposedBridge.log("span classname: " + spanClassName);
+            if(spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2$") || spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.ParentCommentBinderV2$")){
+
+                Field gm6Field = new FieldFinder()
+                        .setTargetObject(span)
+                        .setFieldTypeName("gm6")
+                        .setTypeMatchMode(FieldMatchMode.STARTS_WITH)
+                        .find();
+                if(gm6Field != null){
+                    XposedBridge.log("gm6 field: " + gm6Field.getName());
+                    Object gm6Value = gm6Field.get(span);
+                    assert gm6Value != null;
+                    Field commentCommentInfoField = new FieldFinder()
+                            .setTargetObject(gm6Value)
+                            .setFieldTypeName("CommentCommentInfo")
+                            .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                            .find();
+                    if(commentCommentInfoField != null){
+                        XposedBridge.log("commentCommentInfo field: " + commentCommentInfoField.getName());
+
+                        Object commentCommentInfoFieldValue = commentCommentInfoField.get(gm6Value);
+
+                        assert commentCommentInfoFieldValue != null;
+                        Field commentCommentInfoTargetCommentField = new FieldFinder()
+                                .setTargetObject(commentCommentInfoFieldValue)
+                                .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                                .setFieldTypeName("CommentCommentInfoTargetComment")
+                                .find();
+                        if(commentCommentInfoTargetCommentField != null){
+                            XposedBridge.log("commentCommentInfoTargetComment field: " + commentCommentInfoTargetCommentField.getName());
+
+                            Object commentCommentInfoTargetCommentFieldValue = commentCommentInfoTargetCommentField.get(commentCommentInfoFieldValue);
+
+                            assert commentCommentInfoTargetCommentFieldValue != null;
+                            Field CommentCommentUserField = new FieldFinder()
+                                    .setTargetObject(commentCommentInfoTargetCommentFieldValue)
+                                    .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
+                                    .setFieldTypeName("CommentCommentUser")
+                                    .find();
+                            if(CommentCommentUserField != null){
+                                XposedBridge.log("CommentCommentUser field: " + CommentCommentUserField.getName());
+                                Object CommentCommentUserFieldValue = CommentCommentUserField.get(commentCommentInfoTargetCommentFieldValue);
+
+                                assert CommentCommentUserFieldValue != null;
+                                Field userId = new FieldFinder()
+                                        .setTargetObject(CommentCommentUserFieldValue)
+                                        .setFieldTypeName("java.lang.String")
+                                        .setTypeMatchMode(FieldMatchMode.EQUALS)
+                                        .setFieldValueName("userid")
+                                        .setValueMatchMode(FieldMatchMode.EQUALS).find();
+
+                                if(userId != null){
+                                    XposedBridge.log("userId field: " + userId.getName());
+                                    Object idValue = userId.get(CommentCommentUserFieldValue);
+                                    XposedBridge.log("userId value: " + idValue);
+                                    return (String) idValue;
+                                }
+                                else {
+                                    XposedBridge.log("userId field not found");
+                                }
+                            }
+                            else{
+                                XposedBridge.log("CommentCommentUser field not found");
+                            }
+                        }
+                        else{
+                            XposedBridge.log("commentCommentInfoTargetCommentField field not found");
+                        }
+                    }
+                    else {
+                        XposedBridge.log("commentCommentInfoField field not found");
+                    }
+                }
+                else {
+                    XposedBridge.log("gm6 field not found");
+                }
+            }
+        }
+        return null;
+    }
     private enum FieldMatchMode {
         STARTS_WITH,
         ENDS_WITH,
@@ -326,6 +964,7 @@ public class Hooker implements IXposedHookLoadPackage {
         private String fieldValueName;
         private FieldMatchMode valueMatchMode;
         private boolean enableLogging = false;
+
 
         // 构造函数设置默认值
         public FieldFinder() {
@@ -455,271 +1094,6 @@ public class Hooker implements IXposedHookLoadPackage {
             }
             return null;
         }
-    }
-    @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        // 记录当前加载的应用包名，方便调试
-        XposedBridge.log("Xposed模块已加载到应用: " + lpparam.packageName);
-
-
-        if (!lpparam.packageName.equals("com.xingin.xhs")) {
-            return;
-        }
-
-        ViewHierarchyOverlay.init(lpparam);
-        XposedHelpers.findAndHookMethod("android.view.View", lpparam.classLoader,
-                "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
-                    private float downX, downY;
-                    private long downTime;
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        MotionEvent event = (MotionEvent) param.args[0];
-                        View view = (View) param.thisObject;
-                        switch (event.getAction()) {
-                            case MotionEvent.ACTION_DOWN:
-                                downX = event.getRawX(); // 记录按下时的屏幕 X 坐标
-                                downY = event.getRawY(); // 记录按下时的屏幕 Y 坐标
-                                downTime = System.currentTimeMillis(); // 记录按下时间
-                                break;
-
-                            case MotionEvent.ACTION_UP:
-                                float upX = event.getRawX();
-                                float upY = event.getRawY();
-                                long upTime = System.currentTimeMillis();
-
-                                // 计算时间和位移
-                                long duration = upTime - downTime;
-                                float deltaX = Math.abs(upX - downX);
-                                float deltaY = Math.abs(upY - downY);
-
-                                lastUpX = upX;
-                                lastUpY = upY;
-
-                                // 设定点击的阈值（时间 & 移动距离）
-                                if (duration < 200 && deltaX < 10 && deltaY < 10) {
-                                    XposedBridge.log("performClick view: " + view.getClass().getSimpleName());
-                                    XposedBridge.log("lastClickedView: " + lastClickedView);
-                                    if(view.getClass().getSimpleName().equals("HandlePressStateCommentTextView")){
-                                        lastClickedView = view;
-
-//                                        Layout layout = ((TextView) lastClickedView).getLayout();
-//                                        if (layout != null) {
-//                                            Spannable spannable = new SpannableString(((TextView) lastClickedView).getText());
-//                                            Object[] spans = spannable.getSpans(0, spannable.length(), Object.class);
-//                                            for (Object span : spans) {
-//                                                int start = spannable.getSpanStart(span);
-//                                                int end = spannable.getSpanEnd(span);
-//                                                String subText = spannable.subSequence(start, end).toString();
-//                                                XposedBridge.log("Span 类型: " + span.getClass().getSimpleName() + ", 文本: " + subText);
-//                                            }
-//                                        }
-
-
-
-                                        if (detailActivity != null) {
-                                            ViewGroup rootView = (ViewGroup) detailActivity.getWindow().getDecorView();
-                                            List<View> noteDetailTextViews = findTargetViews(rootView, "NoteDetailTextView");
-                                            XposedBridge.log("noteDetailTextViews: " + noteDetailTextViews);
-                                            StringBuilder noteText = new StringBuilder();
-                                            if(!noteDetailTextViews.isEmpty()){
-                                                for(View _view : noteDetailTextViews){
-                                                    noteText.append(((TextView) _view).getText()).append("。");
-                                                }
-                                            }
-                                            noteDetailText = noteText.toString();
-                                        }
-                                    }
-                                }
-                                break;
-                        }
-
-                    }
-                });
-
-
-        XposedHelpers.findAndHookMethod(
-                "com.xingin.comment.input.ui.NoteCommentActivity",
-                lpparam.classLoader,
-                "onCreate",
-                Bundle.class,
-                new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Activity activity = (Activity) param.thisObject;
-                        XposedBridge.log("发现回复 Activity: " + activity.getClass().getName());
-                        XposedBridge.log("lastClickedView: " + lastClickedView);
-                        if(lastClickedView != null){
-                            ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
-                            View _editTextView = findTargetView(rootView, "RichEditTextPro");
-                            if(_editTextView != null){
-                                editTextView = (EditText) _editTextView;
-                            }
-                            else {
-                                editTextView = null;
-                            }
-
-                            commentText = ((TextView) lastClickedView).getText();
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                showCommentView(activity, commentText);
-                            }
-                            XposedBridge.log("comment text: " + commentText);
-                            XposedBridge.log("commentText classname: " + commentText.getClass().getSimpleName());
-
-                            if(commentText instanceof Spannable){
-                                Spanned spannedText = (Spanned) commentText;
-                                Object[] spans = spannedText.getSpans(0, commentText.length(), Object.class);
-                                for (Object span : spans) {
-                                    String spanClassName = span.getClass().getName();
-                                    XposedBridge.log("span classname: " + spanClassName);
-                                    if(spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2$") || spanClassName.startsWith("com.xingin.matrix.v2.notedetail.itembinder.ParentCommentBinderV2$")){
-
-                                        Field gm6Field = new FieldFinder()
-                                                .setTargetObject(span)
-                                                .setFieldTypeName("gm6")
-                                                .setTypeMatchMode(FieldMatchMode.STARTS_WITH)
-                                                .find();
-                                        if(gm6Field != null){
-                                            XposedBridge.log("gm6 field: " + gm6Field.getName());
-                                            Object gm6Value = gm6Field.get(span);
-                                            assert gm6Value != null;
-                                            Field commentCommentInfoField = new FieldFinder()
-                                                    .setTargetObject(gm6Value)
-                                                    .setFieldTypeName("CommentCommentInfo")
-                                                    .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
-                                                    .find();
-                                            if(commentCommentInfoField != null){
-                                                XposedBridge.log("commentCommentInfo field: " + commentCommentInfoField.getName());
-
-                                                Object commentCommentInfoFieldValue = commentCommentInfoField.get(gm6Value);
-
-                                                assert commentCommentInfoFieldValue != null;
-                                                Field commentCommentInfoTargetCommentField = new FieldFinder()
-                                                        .setTargetObject(commentCommentInfoFieldValue)
-                                                        .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
-                                                        .setFieldTypeName("CommentCommentInfoTargetComment")
-                                                        .find();
-                                                if(commentCommentInfoTargetCommentField != null){
-                                                    XposedBridge.log("commentCommentInfoTargetComment field: " + commentCommentInfoTargetCommentField.getName());
-
-                                                    Object commentCommentInfoTargetCommentFieldValue = commentCommentInfoTargetCommentField.get(commentCommentInfoFieldValue);
-
-                                                    assert commentCommentInfoTargetCommentFieldValue != null;
-                                                    Field CommentCommentUserField = new FieldFinder()
-                                                            .setTargetObject(commentCommentInfoTargetCommentFieldValue)
-                                                            .setTypeMatchMode(FieldMatchMode.ENDS_WITH)
-                                                            .setFieldTypeName("CommentCommentUser")
-                                                            .find();
-                                                    if(CommentCommentUserField != null){
-                                                        XposedBridge.log("CommentCommentUser field: " + CommentCommentUserField.getName());
-                                                        Object CommentCommentUserFieldValue = CommentCommentUserField.get(commentCommentInfoTargetCommentFieldValue);
-
-                                                        assert CommentCommentUserFieldValue != null;
-                                                        Field userId = new FieldFinder()
-                                                                .setTargetObject(CommentCommentUserFieldValue)
-                                                                .setFieldTypeName("java.lang.String")
-                                                                .setTypeMatchMode(FieldMatchMode.EQUALS)
-                                                                .setFieldValueName("userid")
-                                                                .setValueMatchMode(FieldMatchMode.EQUALS).find();
-
-                                                        if(userId != null){
-                                                            XposedBridge.log("userId field: " + userId.getName());
-                                                            Object idValue = userId.get(CommentCommentUserFieldValue);
-                                                            XposedBridge.log("userId value: " + idValue);
-                                                            break;
-                                                        }
-                                                        else {
-                                                            XposedBridge.log("userId field not found");
-                                                        }
-                                                    }
-                                                    else{
-                                                        XposedBridge.log("CommentCommentUser field not found");
-                                                    }
-                                                }
-                                                else{
-                                                    XposedBridge.log("commentCommentInfoTargetCommentField field not found");
-                                                }
-                                            }
-                                            else {
-                                                XposedBridge.log("commentCommentInfoField field not found");
-                                            }
-                                        }
-                                        else {
-                                            XposedBridge.log("gm6 field not found");
-                                        }
-                                    }
-                                }
-                            }
-
-                        }
-
-                        lastClickedView = null;
-                    }
-                }
-        );
-
-        XposedHelpers.findAndHookMethod(
-                "com.xingin.comment.input.ui.NoteCommentActivity",
-                lpparam.classLoader,
-                "onResume",
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        final Activity activity = (Activity) param.thisObject;
-                        activity.runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && lastClickedView != null) {
-                                    showCommentView(activity, commentText);
-                                }
-                            }
-                        });
-                    }
-                });
-
-        XposedHelpers.findAndHookMethod(
-                "com.xingin.comment.input.ui.NoteCommentActivity",
-                lpparam.classLoader, "onDestroy",
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        final Activity activity = (Activity) param.thisObject;
-                        activity.runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                hideCommentView();
-                            }
-                        });
-                        lastClickedView = null;
-                    }
-                });
-        XposedHelpers.findAndHookMethod(
-                "com.xingin.comment.input.ui.NoteCommentActivity",
-                lpparam.classLoader, "onPause",
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        final Activity activity = (Activity) param.thisObject;
-                        activity.runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                hideCommentView();
-                            }
-                        });
-                        lastClickedView = null;
-                    }
-                });
-        XposedHelpers.findAndHookMethod(
-                "com.xingin.matrix.notedetail.NoteDetailActivity",
-                lpparam.classLoader,
-                "onCreate",
-                Bundle.class,
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        detailActivity = (Activity) param.thisObject;
-                    }
-        });
     }
 }
 

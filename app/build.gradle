@@ -26,5 +26,6 @@ dependencies {
     implementation libs.cardview
     implementation libs.androidx.constraintlayout
     implementation(libs.okhttp)
+    implementation libs.fastjson.v1283
     compileOnly files('lib/XposedBridgeApi-89.jar')
 }
