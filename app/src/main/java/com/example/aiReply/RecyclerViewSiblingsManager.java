@@ -5,6 +5,7 @@ import android.util.LruCache;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +23,7 @@ public class RecyclerViewSiblingsManager {
     private WeakReference<Object> recyclerViewRef;
 
     // 缓存反射获取的方法
-    private Method getAdapterMethod;
+    static Method getAdapterMethod;
     private Method getItemCountMethod;
     private Method getChildCountMethod;
     private Method getChildAtMethod;
@@ -30,7 +31,7 @@ public class RecyclerViewSiblingsManager {
     private Method getItemViewTypeMethod;
     private Method createViewHolderMethod;
     private Method bindViewHolderMethod;
-    private Method findContainingViewHolderMethod;
+    static Method findContainingViewHolderMethod;
 
     // ViewHolder相关的方法和常量
     private Method getBindingAdapterPositionMethod;
@@ -52,7 +53,7 @@ public class RecyclerViewSiblingsManager {
          * @param position 视图在适配器中的位置
          * @return true表示应该停止查找，false表示继续
          */
-        boolean shouldStop(View view, int position);
+        boolean shouldStop(View view, int position) throws InvocationTargetException, IllegalAccessException;
     }
     public interface FindSiblingsBeforeCallBack {
         void onAdd(View view);
@@ -250,7 +251,7 @@ public class RecyclerViewSiblingsManager {
      * @param stopCondition 停止条件
      * @return 找到的视图列表（包括起始视图）
      */
-    public List<View> findSiblingsBefore(int startPosition, StopCondition stopCondition, FindSiblingsBeforeCallBack callBack) {
+    public List<View> findSiblingsBefore(int startPosition, StopCondition stopCondition) {
         List<View> results = new ArrayList<>();
         Object recyclerView = recyclerViewRef.get();
 
@@ -280,7 +281,6 @@ public class RecyclerViewSiblingsManager {
             View startView = getViewAtPosition(startPosition, recyclerView, adapter);
             if (startView != null) {
                 results.add(startView);
-                callBack.onAdd(startView);
 
                 // 判断起始视图是否已满足停止条件
                 if (stopCondition.shouldStop(startView, startPosition)) {
@@ -295,7 +295,6 @@ public class RecyclerViewSiblingsManager {
 
                 if (siblingView != null) {
                     results.add(siblingView);
-                    callBack.onAdd(siblingView);
 
                     // 检查是否满足停止条件
                     if (stopCondition.shouldStop(siblingView, pos)) {
@@ -432,7 +431,7 @@ public class RecyclerViewSiblingsManager {
      * @param stopCondition 停止条件
      * @return 找到的视图列表（包括起始视图）
      */
-    public List<View> findSiblingsBefore(View view, StopCondition stopCondition, FindSiblingsBeforeCallBack callBack) {
+    public List<View> findSiblingsBefore(View view, StopCondition stopCondition) {
         Object recyclerView = recyclerViewRef.get();
 
         if (recyclerView == null || view == null || findContainingViewHolderMethod == null) {
@@ -453,7 +452,7 @@ public class RecyclerViewSiblingsManager {
                 return new ArrayList<>();
             }
 
-            return findSiblingsBefore(position, stopCondition, callBack);
+            return findSiblingsBefore(position, stopCondition);
         } catch (Exception e) {
             e.printStackTrace();
             return new ArrayList<>();
