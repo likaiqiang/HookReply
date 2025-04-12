@@ -22,10 +22,12 @@ android {
 }
 
 dependencies {
+    implementation libs.material.v140
     implementation libs.recyclerview
     implementation libs.cardview
     implementation libs.androidx.constraintlayout
     implementation(libs.okhttp)
     implementation libs.fastjson.v1283
+    implementation libs.androidx.appcompat
     compileOnly files('lib/XposedBridgeApi-89.jar')
 }

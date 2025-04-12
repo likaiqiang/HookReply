@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -33,6 +34,7 @@ import org.json.JSONObject;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -44,6 +46,9 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -81,6 +86,10 @@ public class Hooker implements IXposedHookLoadPackage {
 
     private static Map<Object, Object> parentViewHolderCommentMap = new HashMap<>();
     private static Map<String, Object> parentCommentIdToViewHolderMap = new HashMap<>();
+
+    private XSharedPreferences preferences;
+    private String baseUrl;
+    private String apiKey;
 
     private void hookViewHolder(Class<?> clazz, Boolean enableLog ){
         String type = clazz.getSimpleName().startsWith("Parent") ? "parent" : "sub";
@@ -168,6 +177,37 @@ public class Hooker implements IXposedHookLoadPackage {
             return;
         }
 
+        String filePath = "/storage/emulated/0/Android/data/com.example.aiReply/files/config.json";
+        File configFile = new File(filePath);
+        if (!configFile.exists() || !configFile.canRead()) {
+            XposedBridge.log("AI Reply: 配置文件不存在或不可读: " + filePath);
+            return;
+        }
+
+        StringBuilder content = new StringBuilder();
+        BufferedReader reader = new BufferedReader(new FileReader(configFile));
+        String line;
+        while ((line = reader.readLine()) != null) {
+            content.append(line);
+        }
+        reader.close();
+
+        JSONObject jsonConfig = new JSONObject(content.toString());
+        baseUrl = jsonConfig.optString(MainActivity.KEY_BASE_URL, "");
+        apiKey = jsonConfig.optString(MainActivity.KEY_API_KEY, "");
+        boolean showLayoutViewer = jsonConfig.optBoolean(MainActivity.KEY_SHOW_LAYOUT_VIEWER, false);
+
+        XposedBridge.log("baseUrl: " + baseUrl);
+        XposedBridge.log("apiKey: " + apiKey);
+
+        if(baseUrl.isEmpty() || apiKey.isEmpty()){
+            return;
+        }
+
+        if(showLayoutViewer){
+            ViewHierarchyOverlay.init(lpparam);
+        }
+
         Class<?> subCommentBinderClazz = Class.forName(
                 "com.xingin.matrix.v2.notedetail.itembinder.SubCommentBinderV2",
                 false,
@@ -181,8 +221,6 @@ public class Hooker implements IXposedHookLoadPackage {
         hookViewHolder(subCommentBinderClazz, false);
         hookViewHolder(parentCommentBinderClazz, true);
 
-
-//        ViewHierarchyOverlay.init(lpparam);
 
         XposedHelpers.findAndHookMethod("android.view.View", lpparam.classLoader,
                 "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
@@ -216,29 +254,30 @@ public class Hooker implements IXposedHookLoadPackage {
                                 if (duration < 200 && deltaX < 10 && deltaY < 10) {
                                     XposedBridge.log("performClick view: " + view.getClass().getSimpleName());
                                     XposedBridge.log("lastClickedView: " + lastClickedView);
-
-                                    View recycler = findParent(view, view2-> view2.getClass().getSimpleName().equals("CommentListView"));
-                                    if(recycler !=null){
-                                        XposedBridge.log("recycler classname: " + recycler.getClass().getName());
-                                        if(commentRecyclerView==null) {
-                                            commentRecyclerView = recycler;
-                                        }
-                                        if(siblingsManager == null){
-                                            siblingsManager = new RecyclerViewSiblingsManager(recycler);
-                                        }
-                                        lastClickedView = view;
-
-                                        if (detailActivity != null) {
-                                            ViewGroup rootView = (ViewGroup) detailActivity.getWindow().getDecorView();
-                                            List<View> noteDetailTextViews = findTargetViews(rootView, "NoteDetailTextView");
-                                            XposedBridge.log("noteDetailTextViews: " + noteDetailTextViews);
-                                            StringBuilder noteText = new StringBuilder();
-                                            if(!noteDetailTextViews.isEmpty()){
-                                                for(View _view : noteDetailTextViews){
-                                                    noteText.append(((TextView) _view).getText()).append("。");
-                                                }
+                                    if(view.getClass().getSimpleName().equals("HandlePressStateCommentTextView")){
+                                        View recycler = findParent(view, view2-> view2.getClass().getSimpleName().equals("CommentListView"));
+                                        if(recycler !=null){
+                                            XposedBridge.log("recycler classname: " + recycler.getClass().getName());
+                                            if(commentRecyclerView==null) {
+                                                commentRecyclerView = recycler;
                                             }
-                                            noteDetailText = noteText.toString();
+                                            if(siblingsManager == null){
+                                                siblingsManager = new RecyclerViewSiblingsManager(recycler);
+                                            }
+                                            lastClickedView = view;
+
+                                            if (detailActivity != null) {
+                                                ViewGroup rootView = (ViewGroup) detailActivity.getWindow().getDecorView();
+                                                List<View> noteDetailTextViews = findTargetViews(rootView, "NoteDetailTextView");
+                                                XposedBridge.log("noteDetailTextViews: " + noteDetailTextViews);
+                                                StringBuilder noteText = new StringBuilder();
+                                                if(!noteDetailTextViews.isEmpty()){
+                                                    for(View _view : noteDetailTextViews){
+                                                        noteText.append(((TextView) _view).getText()).append("。");
+                                                    }
+                                                }
+                                                noteDetailText = noteText.toString();
+                                            }
                                         }
                                     }
                                 }
@@ -526,7 +565,6 @@ public class Hooker implements IXposedHookLoadPackage {
         }
         void askAi(String prompt) throws JSONException {
             XposedBridge.log("askAi：" + prompt);
-            String API_URL = "https://api.lkeap.cloud.tencent.com/v1/chat/completions";
             OkHttpClient client = new OkHttpClient.Builder()
                     .connectTimeout(10, TimeUnit.SECONDS)  // 连接超时时间
                     .readTimeout(30, TimeUnit.SECONDS)     // 读取超时时间
@@ -542,8 +580,8 @@ public class Hooker implements IXposedHookLoadPackage {
 
             RequestBody body = RequestBody.create(jsonString, JSON);
             Request request = new Request.Builder()
-                    .url(API_URL)
-                    .addHeader("Authorization", "Bearer " + "sk-IkxvpPjHxJmHLyqRa46LsHVNIYahxuR9QU2aoMYNF5aEPAGf")
+                    .url(hooker.baseUrl)
+                    .addHeader("Authorization", "Bearer " + hooker.apiKey)
                     .addHeader("Content-Type", "application/json")
                     .post(body)
                     .build();
