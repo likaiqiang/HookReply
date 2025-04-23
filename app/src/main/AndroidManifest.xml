@@ -2,7 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.aiReply"
     xmlns:tools="http://schemas.android.com/tools">
-    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 权限声明 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:allowBackup="true"
@@ -14,6 +18,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         tools:targetApi="34">
+
+        <!-- 主活动 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -21,13 +27,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 添加这个intent-filter，让MainActivity也作为Xposed模块设置入口 -->
+            <!-- 作为Xposed模块设置入口 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
 
+        <receiver android:name=".AiRequestReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.aiReply.RECEIVE_PROMPT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Xposed模块元数据 -->
         <meta-data
             android:name="xposedmodule"
             android:value="true" />

@@ -1,10 +1,9 @@
 package com.example.aiReply;
 
-import android.annotation.SuppressLint;
-import android.content.Context;
-import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -14,8 +13,10 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -27,23 +28,39 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.concurrent.TimeUnit;
+
+import de.robv.android.xposed.XposedBridge;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
 
-    private EditText editBaseUrl;
+    private EditText editEndPoint;
     private EditText editApiKey;
+    private EditText editModelName;
     private CheckBox checkboxLayoutViewer;
     private Button buttonSave;
     private Button buttonImportJson;
 
     // 定义SharedPreferences常量
     public static final String PREFS_NAME = "AiReplyPrefs";
-    public static final String KEY_BASE_URL = "base_url";
+    public static final String KEY_END_POINT = "end_point";
     public static final String KEY_API_KEY = "api_key";
+    public static final String KEY_MODEL_NAME = "model_name";
     public static final String KEY_SHOW_LAYOUT_VIEWER = "show_layout_viewer";
 
     // 文件选择器的ActivityResultLauncher
     private ActivityResultLauncher<String[]> filePickerLauncher;
+
+    private String lastPrompt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,8 +68,9 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         // 初始化视图
-        editBaseUrl = findViewById(R.id.editBaseUrl);
+        editEndPoint = findViewById(R.id.editEndPoint);
         editApiKey = findViewById(R.id.editApiKey);
+        editModelName = findViewById(R.id.editModelName);
         checkboxLayoutViewer = findViewById(R.id.checkboxLayoutViewer);
         buttonSave = findViewById(R.id.buttonSave);
         buttonImportJson = findViewById(R.id.buttonImportJson);
@@ -126,14 +144,19 @@ public class MainActivity extends AppCompatActivity {
     private void importSettingsFromJson(String jsonString) throws JSONException {
         JSONObject json = new JSONObject(jsonString);
 
-        if (json.has(KEY_BASE_URL)) {
-            String baseUrl = json.getString(KEY_BASE_URL);
-            editBaseUrl.setText(baseUrl);
+        if (json.has(KEY_END_POINT)) {
+            String baseUrl = json.getString(KEY_END_POINT);
+            editEndPoint.setText(baseUrl);
         }
 
         if (json.has(KEY_API_KEY)) {
             String apiKey = json.getString(KEY_API_KEY);
             editApiKey.setText(apiKey);
+        }
+
+        if (json.has(KEY_MODEL_NAME)) {
+            String apiKey = json.getString(KEY_MODEL_NAME);
+            editModelName.setText(apiKey);
         }
 
         if (json.has(KEY_SHOW_LAYOUT_VIEWER)) {
@@ -162,24 +185,27 @@ public class MainActivity extends AppCompatActivity {
         reader.close();
 
         JSONObject jsonConfig = new JSONObject(content.toString());
-        String baseUrl = jsonConfig.optString(MainActivity.KEY_BASE_URL, "");
+        String endpoint = jsonConfig.optString(MainActivity.KEY_END_POINT, "");
         String apiKey = jsonConfig.optString(MainActivity.KEY_API_KEY, "");
+        String modelName = jsonConfig.optString(MainActivity.KEY_MODEL_NAME, "");
         boolean showLayoutViewer = jsonConfig.optBoolean(MainActivity.KEY_SHOW_LAYOUT_VIEWER, false);
 
-        editBaseUrl.setText(baseUrl);
+        editEndPoint.setText(endpoint);
         editApiKey.setText(apiKey);
+        editModelName.setText(modelName);
         checkboxLayoutViewer.setChecked(showLayoutViewer);
     }
 
     // 保存设置
     private void saveSettings() {
-        String baseUrl = editBaseUrl.getText().toString().trim();
+        String endPoint = editEndPoint.getText().toString().trim();
         String apiKey = editApiKey.getText().toString().trim();
+        String modelName = editModelName.getText().toString().trim();
         boolean showLayoutViewer = checkboxLayoutViewer.isChecked();
 
         // 简单的验证
-        if (baseUrl.isEmpty()) {
-            Toast.makeText(this, "请输入baseUrl", Toast.LENGTH_SHORT).show();
+        if (endPoint.isEmpty()) {
+            Toast.makeText(this, "请输入endPoint", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -187,11 +213,16 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "请输入apiKey", Toast.LENGTH_SHORT).show();
             return;
         }
+        if (modelName.isEmpty()) {
+            Toast.makeText(this, "请输入modelName", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         try {
             JSONObject jsonConfig = new JSONObject();
-            jsonConfig.put(KEY_BASE_URL, baseUrl);
+            jsonConfig.put(KEY_END_POINT, endPoint);
             jsonConfig.put(KEY_API_KEY, apiKey);
+            jsonConfig.put(KEY_MODEL_NAME, modelName);
             jsonConfig.put(KEY_SHOW_LAYOUT_VIEWER, showLayoutViewer);
 
             String filePath = getExternalFilesDir(null) + "/config.json";

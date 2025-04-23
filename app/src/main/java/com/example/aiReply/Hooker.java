@@ -4,8 +4,12 @@ import static com.example.aiReply.RecyclerViewSiblingsManager.findContainingView
 import static com.example.aiReply.ViewFinder.findParent;
 
 import android.app.Activity;
+import android.app.AndroidAppHelper;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 
@@ -13,7 +17,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -25,10 +28,9 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
+import androidx.core.content.ContextCompat;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -38,20 +40,10 @@ import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
-import okhttp3.Call;
-import okhttp3.Callback;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -60,8 +52,8 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.Map;
+import java.util.UUID;
 
 
 public class Hooker implements IXposedHookLoadPackage {
@@ -88,9 +80,9 @@ public class Hooker implements IXposedHookLoadPackage {
     private static Map<String, Object> parentCommentIdToViewHolderMap = new HashMap<>();
 
     private XSharedPreferences preferences;
-    private String baseUrl;
+    private String endPoint;
     private String apiKey;
-
+    private String modelName;
     private void hookViewHolder(Class<?> clazz, Boolean enableLog ){
         String type = clazz.getSimpleName().startsWith("Parent") ? "parent" : "sub";
         for (Method m : clazz.getDeclaredMethods()) {
@@ -171,11 +163,11 @@ public class Hooker implements IXposedHookLoadPackage {
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
         // 记录当前加载的应用包名，方便调试
         XposedBridge.log("Xposed模块已加载到应用: " + lpparam.packageName);
-        ClassLoader targetClassLoader = lpparam.classLoader;
 
         if (!lpparam.packageName.equals("com.xingin.xhs")) {
             return;
         }
+
 
         String filePath = "/storage/emulated/0/Android/data/com.example.aiReply/files/config.json";
         File configFile = new File(filePath);
@@ -193,14 +185,16 @@ public class Hooker implements IXposedHookLoadPackage {
         reader.close();
 
         JSONObject jsonConfig = new JSONObject(content.toString());
-        baseUrl = jsonConfig.optString(MainActivity.KEY_BASE_URL, "");
+        endPoint = jsonConfig.optString(MainActivity.KEY_END_POINT, "");
         apiKey = jsonConfig.optString(MainActivity.KEY_API_KEY, "");
+        modelName = jsonConfig.optString(MainActivity.KEY_MODEL_NAME, "");
         boolean showLayoutViewer = jsonConfig.optBoolean(MainActivity.KEY_SHOW_LAYOUT_VIEWER, false);
 
-        XposedBridge.log("baseUrl: " + baseUrl);
+        XposedBridge.log("endPoint: " + endPoint);
         XposedBridge.log("apiKey: " + apiKey);
+        XposedBridge.log("modelName: " + modelName);
 
-        if(baseUrl.isEmpty() || apiKey.isEmpty()){
+        if(endPoint.isEmpty() || apiKey.isEmpty() || modelName.isEmpty()){
             return;
         }
 
@@ -220,7 +214,6 @@ public class Hooker implements IXposedHookLoadPackage {
         );
         hookViewHolder(subCommentBinderClazz, false);
         hookViewHolder(parentCommentBinderClazz, true);
-
 
         XposedHelpers.findAndHookMethod("android.view.View", lpparam.classLoader,
                 "dispatchTouchEvent", MotionEvent.class, new XC_MethodHook() {
@@ -331,7 +324,7 @@ public class Hooker implements IXposedHookLoadPackage {
                                         context.add(commentContent);
                                     }
 
-                                    Integer index = 0;
+                                    int index = 0;
                                     while (commentTargetId != null) {
                                         XposedBridge.log("commentTargetId " + index + ": " + commentTargetId);
                                         XposedBridge.log("commentId: " + index + ": " + commentId);
@@ -557,88 +550,67 @@ public class Hooker implements IXposedHookLoadPackage {
     private static class CommentView extends LinearLayout {
         Hooker hooker;
         private boolean loading = false;
+        private boolean receiverRegistered = false;
+        private static final Map<String, String> requestMap = new HashMap<>();
 
         public CommentView(Context context, Hooker hooker) {
             super(context);
             this.hooker = hooker;
             init(context);
         }
+        private synchronized void ensureReceiverRegistered(Context context) {
+            if (receiverRegistered) {
+                return;
+            }
+
+            BroadcastReceiver responseReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if ("com.example.aiReply.RECEIVE_RESPONSE".equals(intent.getAction())) {
+                        String response = intent.getStringExtra("response");
+                        String packageName = intent.getStringExtra("package_name");
+                        String requestId = intent.getStringExtra("request_id");
+
+                        XposedBridge.log( ": Received response for request " + requestId);
+                        if(requestMap.containsKey(requestId)){
+                            hooker.editTextView.setText(response);
+                            requestMap.remove(requestId);
+                        }
+                        loading = false;
+                    }
+                }
+            };
+
+            IntentFilter filter = new IntentFilter("com.example.aiReply.RECEIVE_RESPONSE");
+            ContextCompat.registerReceiver(context, responseReceiver, filter,ContextCompat.RECEIVER_EXPORTED);
+            receiverRegistered = true;
+
+            XposedBridge.log("Response receiver registered");
+        }
         void askAi(String prompt) throws JSONException {
             XposedBridge.log("askAi：" + prompt);
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)  // 连接超时时间
-                    .readTimeout(30, TimeUnit.SECONDS)     // 读取超时时间
-                    .writeTimeout(30, TimeUnit.SECONDS)    // 写入超时时间
-                    .build();
-            MediaType JSON = MediaType.get("application/json; charset=utf-8");
-            JSONObject jsonBody = new JSONObject();
-            jsonBody.put("model", "deepseek-v3");
-            jsonBody.put("messages", new JSONArray().put(new JSONObject().put("role", "user").put("content", prompt)));
-            jsonBody.put("stream", false);
+            Context appContext = AndroidAppHelper.currentApplication();
+            ensureReceiverRegistered(appContext);
 
-            String jsonString = jsonBody.toString();
+            Intent broadcast = new Intent("com.example.aiReply.RECEIVE_PROMPT");
+            broadcast.setPackage("com.example.aiReply");
+            broadcast.putExtra("prompt", prompt);
+            String requestId = UUID.randomUUID().toString();
+            broadcast.putExtra("request_id",requestId);
+            broadcast.putExtra("package_name", "com.xingin.xhs");
+            broadcast.putExtra(MainActivity.KEY_END_POINT, hooker.endPoint);
+            broadcast.putExtra(MainActivity.KEY_API_KEY, hooker.apiKey);
+            broadcast.putExtra(MainActivity.KEY_MODEL_NAME, hooker.modelName);
 
-            RequestBody body = RequestBody.create(jsonString, JSON);
-            Request request = new Request.Builder()
-                    .url(hooker.baseUrl)
-                    .addHeader("Authorization", "Bearer " + hooker.apiKey)
-                    .addHeader("Content-Type", "application/json")
-                    .post(body)
-                    .build();
+            try {
+                appContext.sendBroadcast(broadcast);
+                XposedBridge.log("Broadcast sent successfully");
+                requestMap.put(requestId, prompt);
+            } catch (Exception e) {
+                XposedBridge.log("Error sending broadcast: " + e.getMessage());
+                e.printStackTrace();
+            }
 
-            client.newCall(request).enqueue(new Callback() {
-                @Override
-                public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                    XposedBridge.log("call failed: " + e.getMessage());
-
-                    // 打印完整的异常栈信息
-                    StringWriter sw = new StringWriter();
-                    PrintWriter pw = new PrintWriter(sw);
-                    e.printStackTrace(pw);
-                    XposedBridge.log("StackTrace: " + sw.toString());
-                }
-
-                @Override
-                public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                    XposedBridge.log(String.valueOf(response));
-                    if (!response.isSuccessful()) {
-                        throw new IOException("Unexpected code " + response);
-                    }
-                    if(response.body() != null){
-                        String responseBody = response.body().string();
-                        XposedBridge.log("Response: "+responseBody);
-                        try {
-                            // 解析 JSON 对象
-                            JSONObject jsonObject = new JSONObject(responseBody);
-
-                            // 获取 "choices" 数组
-                            JSONArray choicesArray = jsonObject.getJSONArray("choices");
-
-                            // 确保数组至少有一个元素
-                            if (choicesArray.length() > 0) {
-                                JSONObject firstChoice = choicesArray.getJSONObject(0);  // 取第一个元素
-
-                                // 获取 "message" 对象
-                                JSONObject messageObject = firstChoice.getJSONObject("message");
-
-                                // 获取 "content" 字段
-                                String content = messageObject.getString("content");
-
-                                // 打印 content
-                                XposedBridge.log("Content: " + content);
-                                XposedBridge.log(String.valueOf(hooker.editTextView));
-                                new Handler(Looper.getMainLooper()).post(() -> {
-                                    hooker.editTextView.setText(content);
-                                });
-                            } else {
-                                XposedBridge.log("Choices array is empty!");
-                            }
-                        } catch (JSONException e) {
-                            XposedBridge.log("JSON Parsing Error: " + e.getMessage());
-                        }
-                    }
-                }
-            });
         }
         private String getContextStr(){
             int indentLevel = 0;
