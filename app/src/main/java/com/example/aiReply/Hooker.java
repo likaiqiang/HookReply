@@ -48,6 +48,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Objects;
@@ -552,6 +553,7 @@ public class Hooker implements IXposedHookLoadPackage {
         private boolean loading = false;
         private boolean receiverRegistered = false;
         private static final Map<String, String> requestMap = new HashMap<>();
+        private static final Set<BroadcastReceiver> RECEIVERS = new HashSet<>();
 
         public CommentView(Context context, Hooker hooker) {
             super(context);
@@ -566,13 +568,14 @@ public class Hooker implements IXposedHookLoadPackage {
             BroadcastReceiver responseReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
+                    XposedBridge.log(": Received response for request ");
                     if ("com.example.aiReply.RECEIVE_RESPONSE".equals(intent.getAction())) {
                         String response = intent.getStringExtra("response");
                         String packageName = intent.getStringExtra("package_name");
                         String requestId = intent.getStringExtra("request_id");
 
-                        XposedBridge.log( ": Received response for request " + requestId);
-                        if(requestMap.containsKey(requestId)){
+                        XposedBridge.log(": Received response for request " + requestId);
+                        if (requestMap.containsKey(requestId)) {
                             hooker.editTextView.setText(response);
                             requestMap.remove(requestId);
                         }
@@ -580,6 +583,7 @@ public class Hooker implements IXposedHookLoadPackage {
                     }
                 }
             };
+            RECEIVERS.add(responseReceiver);
 
             IntentFilter filter = new IntentFilter("com.example.aiReply.RECEIVE_RESPONSE");
             ContextCompat.registerReceiver(context, responseReceiver, filter,ContextCompat.RECEIVER_EXPORTED);
