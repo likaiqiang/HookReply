@@ -1,13 +1,11 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
-import static com.example.aiReply.ViewFinder.findParent;
+import static com.delete.aiReply.ViewFinder.findParent;
 
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.TextView;
-
-import java.lang.reflect.Field;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;

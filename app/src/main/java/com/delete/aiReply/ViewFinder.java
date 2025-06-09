@@ -1,4 +1,4 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
 import android.view.View;
 import android.view.ViewGroup;

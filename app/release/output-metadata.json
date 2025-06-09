@@ -4,7 +4,7 @@
     "type": "APK",
     "kind": "Directory"
   },
-  "applicationId": "com.example.aiReply",
+  "applicationId": "com.delete.aiReply",
   "variantName": "release",
   "elements": [
     {
@@ -12,10 +12,26 @@
       "filters": [],
       "attributes": [],
       "versionCode": 1,
-      "versionName": "1.0",
-      "outputFile": "app-release.apk"
+      "versionName": "1.0.1",
+      "outputFile": "aiReply_v1.0.1_release.apk"
     }
   ],
   "elementType": "File",
+  "baselineProfiles": [
+    {
+      "minApi": 28,
+      "maxApi": 30,
+      "baselineProfiles": [
+        "baselineProfiles/1/aiReply_v1.0.1_release.dm"
+      ]
+    },
+    {
+      "minApi": 31,
+      "maxApi": 2147483647,
+      "baselineProfiles": [
+        "baselineProfiles/0/aiReply_v1.0.1_release.dm"
+      ]
+    }
+  ],
   "minSdkVersionForDexing": 24
 }

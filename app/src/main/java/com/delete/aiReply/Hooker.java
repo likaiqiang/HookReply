@@ -1,7 +1,7 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
-import static com.example.aiReply.RecyclerViewSiblingsManager.findContainingViewHolderMethod;
-import static com.example.aiReply.ViewFinder.findParent;
+import static com.delete.aiReply.RecyclerViewSiblingsManager.findContainingViewHolderMethod;
+import static com.delete.aiReply.ViewFinder.findParent;
 
 import android.app.Activity;
 import android.app.AndroidAppHelper;
@@ -170,7 +170,7 @@ public class Hooker implements IXposedHookLoadPackage {
         }
 
 
-        String filePath = "/storage/emulated/0/Android/data/com.example.aiReply/files/config.json";
+        String filePath = "/storage/emulated/0/Android/data/com.delete.aiReply/files/config.json";
         File configFile = new File(filePath);
         if (!configFile.exists() || !configFile.canRead()) {
             XposedBridge.log("AI Reply: 配置文件不存在或不可读: " + filePath);
@@ -435,6 +435,28 @@ public class Hooker implements IXposedHookLoadPackage {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         detailActivity = (Activity) param.thisObject;
+
+                        Context context = (Context) param.thisObject;
+
+                        XposedBridge.log("android.app.Application onCreate");
+
+                        // Start our persistent service
+                        Intent serviceIntent = new Intent();
+                        serviceIntent.setComponent(new android.content.ComponentName(
+                                "com.delete.aiReply",
+                                "com.delete.aiReply.PersistentService"));
+
+                        // Try to start the service
+                        try {
+                            XposedBridge.log("Starting persistent service...");
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                context.startForegroundService(serviceIntent); // no return value
+                            } else {
+                                context.startService(serviceIntent);
+                            }
+                        } catch (Exception e) {
+                            XposedBridge.log("Failed to start service: " + e.getMessage());
+                        }
                     }
                 });
 
@@ -569,7 +591,7 @@ public class Hooker implements IXposedHookLoadPackage {
                 @Override
                 public void onReceive(Context context, Intent intent) {
                     XposedBridge.log(": Received response for request ");
-                    if ("com.example.aiReply.RECEIVE_RESPONSE".equals(intent.getAction())) {
+                    if ("com.delete.aiReply.RECEIVE_RESPONSE".equals(intent.getAction())) {
                         String response = intent.getStringExtra("response");
                         String packageName = intent.getStringExtra("package_name");
                         String requestId = intent.getStringExtra("request_id");
@@ -585,7 +607,7 @@ public class Hooker implements IXposedHookLoadPackage {
             };
             RECEIVERS.add(responseReceiver);
 
-            IntentFilter filter = new IntentFilter("com.example.aiReply.RECEIVE_RESPONSE");
+            IntentFilter filter = new IntentFilter("com.delete.aiReply.RECEIVE_RESPONSE");
             ContextCompat.registerReceiver(context, responseReceiver, filter,ContextCompat.RECEIVER_EXPORTED);
             receiverRegistered = true;
 
@@ -596,8 +618,8 @@ public class Hooker implements IXposedHookLoadPackage {
             Context appContext = AndroidAppHelper.currentApplication();
             ensureReceiverRegistered(appContext);
 
-            Intent broadcast = new Intent("com.example.aiReply.RECEIVE_PROMPT");
-            broadcast.setPackage("com.example.aiReply");
+            Intent broadcast = new Intent("com.delete.aiReply.RECEIVE_PROMPT");
+            broadcast.setPackage("com.delete.aiReply");
             broadcast.putExtra("prompt", prompt);
             String requestId = UUID.randomUUID().toString();
             broadcast.putExtra("request_id",requestId);

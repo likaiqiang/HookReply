@@ -1,4 +1,4 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;

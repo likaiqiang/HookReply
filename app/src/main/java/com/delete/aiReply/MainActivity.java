@@ -1,9 +1,7 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -13,33 +11,20 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
-import org.json.JSONArray;
+import com.example.aiReply.R;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.concurrent.TimeUnit;
-
-import de.robv.android.xposed.XposedBridge;
-import okhttp3.Call;
-import okhttp3.Callback;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -170,7 +155,7 @@ public class MainActivity extends AppCompatActivity {
     // 加载已保存的设置
     private void loadSettings() throws IOException, JSONException {
 
-        String filePath = "/storage/emulated/0/Android/data/com.example.aiReply/files/config.json";
+        String filePath = "/storage/emulated/0/Android/data/com.delete.aiReply/files/config.json";
         File configFile = new File(filePath);
         if (!configFile.exists() || !configFile.canRead()) {
             Log.d("MainActivity","AI Reply: 配置文件不存在或不可读: " + filePath);

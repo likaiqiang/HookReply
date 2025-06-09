@@ -3,21 +3,34 @@ plugins {
 }
 
 android {
-    namespace 'com.example.aiReply'
+    namespace 'com.delete.aiReply'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.aiReply"
+        applicationId "com.delete.aiReply"
         minSdk 24
         targetSdk 34
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+    }
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == "release") {
+            variant.outputs.all { output ->
+                def appName = "aiReply"
+                def versionName = variant.versionName
+                def versionCode = variant.versionCode
+                def buildType = variant.buildType.name
+                def newApkName = "${appName}_v${versionName}_${buildType}.apk"
+
+                outputFileName = newApkName
+            }
+        }
     }
 }
 

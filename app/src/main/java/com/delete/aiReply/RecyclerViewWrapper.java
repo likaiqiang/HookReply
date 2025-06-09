@@ -1,4 +1,4 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
 import de.robv.android.xposed.XposedBridge;
 import java.lang.reflect.*;

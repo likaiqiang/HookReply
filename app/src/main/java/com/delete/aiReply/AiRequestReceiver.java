@@ -1,11 +1,9 @@
-package com.example.aiReply;
+package com.delete.aiReply;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.os.AsyncTask;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -20,7 +18,6 @@ import java.io.StringWriter;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import de.robv.android.xposed.XposedBridge;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.MediaType;
@@ -34,11 +31,11 @@ public class AiRequestReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         Log.d("AiRequestReceiver", "onReceive action: " + intent.getAction());
 
-        if ("com.example.aiReply.RECEIVE_PROMPT".equals(intent.getAction())) {
+        if ("com.delete.aiReply.RECEIVE_PROMPT".equals(intent.getAction())) {
             String prompt = intent.getStringExtra("prompt");
-            String modelName = intent.getStringExtra(MainActivity.KEY_MODEL_NAME);
-            String endpoint = intent.getStringExtra(MainActivity.KEY_END_POINT);
-            String apiKey = intent.getStringExtra(MainActivity.KEY_API_KEY);
+            String modelName = intent.getStringExtra(com.delete.aiReply.MainActivity.KEY_MODEL_NAME);
+            String endpoint = intent.getStringExtra(com.delete.aiReply.MainActivity.KEY_END_POINT);
+            String apiKey = intent.getStringExtra(com.delete.aiReply.MainActivity.KEY_API_KEY);
 
             String requestId = intent.getStringExtra("request_id");
             String packageName = intent.getStringExtra("package_name");
@@ -160,7 +157,7 @@ public class AiRequestReceiver extends BroadcastReceiver {
         protected void onPostExecute(String result) {
             // 3. 将结果回传给Hooker.java
             try {
-                Intent responseIntent = new Intent("com.example.aiReply.RECEIVE_RESPONSE");
+                Intent responseIntent = new Intent("com.delete.aiReply.RECEIVE_RESPONSE");
                 responseIntent.setPackage(packageName);
                 responseIntent.putExtra("response", result);
                 responseIntent.putExtra("package_name", packageName);
