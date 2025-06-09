@@ -19,6 +19,25 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    signingConfigs {
+        release {
+            if (System.getenv("ORG_GRADLE_PROJECT_STORE_FILE") != null) {
+                storeFile file(System.getenv("ORG_GRADLE_PROJECT_STORE_FILE"))
+                storePassword System.getenv("ORG_GRADLE_PROJECT_STORE_PASSWORD")
+                keyAlias System.getenv("ORG_GRADLE_PROJECT_KEY_ALIAS")
+                keyPassword System.getenv("ORG_GRADLE_PROJECT_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
             variant.outputs.all { output ->
