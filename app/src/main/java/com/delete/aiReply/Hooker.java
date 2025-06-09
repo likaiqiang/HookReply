@@ -186,7 +186,7 @@ public class Hooker implements IXposedHookLoadPackage {
         reader.close();
 
         JSONObject jsonConfig = new JSONObject(content.toString());
-        endPoint = jsonConfig.optString(MainActivity.KEY_END_POINT, "");
+        endPoint = jsonConfig.optString(MainActivity.KEY_BASE_URL, "");
         apiKey = jsonConfig.optString(MainActivity.KEY_API_KEY, "");
         modelName = jsonConfig.optString(MainActivity.KEY_MODEL_NAME, "");
         boolean showLayoutViewer = jsonConfig.optBoolean(MainActivity.KEY_SHOW_LAYOUT_VIEWER, false);
@@ -624,7 +624,7 @@ public class Hooker implements IXposedHookLoadPackage {
             String requestId = UUID.randomUUID().toString();
             broadcast.putExtra("request_id",requestId);
             broadcast.putExtra("package_name", "com.xingin.xhs");
-            broadcast.putExtra(MainActivity.KEY_END_POINT, hooker.endPoint);
+            broadcast.putExtra(MainActivity.KEY_BASE_URL, hooker.endPoint);
             broadcast.putExtra(MainActivity.KEY_API_KEY, hooker.apiKey);
             broadcast.putExtra(MainActivity.KEY_MODEL_NAME, hooker.modelName);
 

@@ -13,8 +13,6 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.example.aiReply.R;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -37,7 +35,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 定义SharedPreferences常量
     public static final String PREFS_NAME = "AiReplyPrefs";
-    public static final String KEY_END_POINT = "end_point";
+    public static final String KEY_BASE_URL = "base_url";
     public static final String KEY_API_KEY = "api_key";
     public static final String KEY_MODEL_NAME = "model_name";
     public static final String KEY_SHOW_LAYOUT_VIEWER = "show_layout_viewer";
@@ -129,8 +127,8 @@ public class MainActivity extends AppCompatActivity {
     private void importSettingsFromJson(String jsonString) throws JSONException {
         JSONObject json = new JSONObject(jsonString);
 
-        if (json.has(KEY_END_POINT)) {
-            String baseUrl = json.getString(KEY_END_POINT);
+        if (json.has(KEY_BASE_URL)) {
+            String baseUrl = json.getString(KEY_BASE_URL);
             editEndPoint.setText(baseUrl);
         }
 
@@ -154,13 +152,33 @@ public class MainActivity extends AppCompatActivity {
 
     // 加载已保存的设置
     private void loadSettings() throws IOException, JSONException {
-
         String filePath = "/storage/emulated/0/Android/data/com.delete.aiReply/files/config.json";
-        File configFile = new File(filePath);
+        File appDir = getExternalFilesDir(null);
+        File configFile = new File(appDir, "config.json");
+
         if (!configFile.exists() || !configFile.canRead()) {
-            Log.d("MainActivity","AI Reply: 配置文件不存在或不可读: " + filePath);
-            return;
+
+            // 创建父目录（递归）
+            File parentDir = configFile.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                boolean dirsCreated = parentDir.mkdirs();
+                Log.d("MainActivity", "目录创建结果: " + dirsCreated);
+            }
+
+            // 创建默认 JSON 内容
+            JSONObject defaultConfig = new JSONObject();
+            defaultConfig.put(MainActivity.KEY_BASE_URL, "");
+            defaultConfig.put(MainActivity.KEY_API_KEY, "");
+            defaultConfig.put(MainActivity.KEY_MODEL_NAME, "");
+            defaultConfig.put(MainActivity.KEY_SHOW_LAYOUT_VIEWER, false);
+
+            // 写入文件
+            FileWriter writer = new FileWriter(configFile);
+            writer.write(defaultConfig.toString(4)); // 缩进美化写入
+            writer.close();
         }
+
+        // 读取 JSON 配置文件
         StringBuilder content = new StringBuilder();
         BufferedReader reader = new BufferedReader(new FileReader(configFile));
         String line;
@@ -170,7 +188,7 @@ public class MainActivity extends AppCompatActivity {
         reader.close();
 
         JSONObject jsonConfig = new JSONObject(content.toString());
-        String endpoint = jsonConfig.optString(MainActivity.KEY_END_POINT, "");
+        String endpoint = jsonConfig.optString(MainActivity.KEY_BASE_URL, "");
         String apiKey = jsonConfig.optString(MainActivity.KEY_API_KEY, "");
         String modelName = jsonConfig.optString(MainActivity.KEY_MODEL_NAME, "");
         boolean showLayoutViewer = jsonConfig.optBoolean(MainActivity.KEY_SHOW_LAYOUT_VIEWER, false);
@@ -190,7 +208,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 简单的验证
         if (endPoint.isEmpty()) {
-            Toast.makeText(this, "请输入endPoint", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "请输入baseUrl", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -205,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
 
         try {
             JSONObject jsonConfig = new JSONObject();
-            jsonConfig.put(KEY_END_POINT, endPoint);
+            jsonConfig.put(KEY_BASE_URL, endPoint);
             jsonConfig.put(KEY_API_KEY, apiKey);
             jsonConfig.put(KEY_MODEL_NAME, modelName);
             jsonConfig.put(KEY_SHOW_LAYOUT_VIEWER, showLayoutViewer);
