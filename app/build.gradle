@@ -62,5 +62,5 @@ dependencies {
     implementation libs.fastjson.v1283
     implementation libs.androidx.appcompat
     implementation libs.langchain4j.open.ai
-    compileOnly files('lib/XposedBridgeApi-89.jar')
+    compileOnly files('lib/XposedBridgeAPI-89.jar')
 }
