@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
-          java-version: '11'  # 根据你项目使用的 JDK 版本选择
+          java-version: '17'  # 根据你项目使用的 JDK 版本选择
 
       - name: Decode Keystore
         run: |
