@@ -33,9 +33,10 @@ jobs:
 
       - name: Check lib directory
         run: |
+          echo "Working directory: $GITHUB_WORKSPACE"
           ls -la app/lib/
-          file app/lib/XposedBridgeApi-89.jar
-          chmod 644 app/lib/XposedBridgeApi-89.jar
+          file "$GITHUB_WORKSPACE/app/lib/XposedBridgeApi-89.jar"
+          chmod 644 "$GITHUB_WORKSPACE/app/lib/XposedBridgeApi-89.jar"
 
       - name: Clean project
         run: ./gradlew clean
