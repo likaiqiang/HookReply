@@ -31,8 +31,14 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Debug with tmate session
-        uses: mxschmitt/action-tmate@v3
+      - name: Check lib directory
+        run: |
+          ls -la app/lib/
+          file app/lib/XposedBridgeApi-89.jar
+          chmod 644 app/lib/XposedBridgeApi-89.jar
+
+      - name: Clean project
+        run: ./gradlew clean
 
       - name: Build Release APK
         run: ./gradlew assembleRelease
